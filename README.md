@@ -2,6 +2,8 @@
 
 MCP server for AI-powered Roblox Studio integration. 18 specialized tools for exploring projects, analyzing scripts, and performing bulk operations.
 
+https://devforum.roblox.com/t/v180-roblox-studio-mcp-speed-up-your-workflow-by-letting-ai-read-paths-and-properties/3707071
+
 <a href="https://glama.ai/mcp/servers/@boshyxd/robloxstudio-mcp">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@boshyxd/robloxstudio-mcp/badge" alt="Roblox Studio Server MCP server" />
 </a>
