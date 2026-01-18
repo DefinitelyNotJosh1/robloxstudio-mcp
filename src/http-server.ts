@@ -1,17 +1,62 @@
-import express from 'express';
+import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { RobloxStudioTools } from './tools/index.js';
 import { BridgeService } from './bridge-service.js';
 
+// =============================================================================
+// Route Factory - Reduces code duplication for MCP tool endpoints
+// =============================================================================
+
+type ToolHandler = (body: Record<string, unknown>) => Promise<unknown>;
+
+interface RouteDefinition {
+  path: string;
+  handler: ToolHandler;
+}
+
+/**
+ * Creates a POST route with standardized error handling
+ */
+function createToolRoute(app: Express, path: string, handler: ToolHandler): void {
+  app.post(path, async (req: Request, res: Response) => {
+    try {
+      const result = await handler(req.body);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[${path}] Error:`, message);
+      res.status(500).json({ error: message });
+    }
+  });
+}
+
+/**
+ * Registers multiple tool routes at once
+ */
+function registerToolRoutes(app: Express, routes: RouteDefinition[]): void {
+  for (const route of routes) {
+    createToolRoute(app, route.path, route.handler);
+  }
+}
+
+// =============================================================================
+// HTTP Server Factory
+// =============================================================================
+
 export function createHttpServer(tools: RobloxStudioTools, bridge: BridgeService) {
   const app = express();
+  
+  // Connection state tracking
   let pluginConnected = false;
   let mcpServerActive = false;
   let lastMCPActivity = 0;
   let mcpServerStartTime = 0;
   let lastPluginActivity = 0;
 
-  // Track MCP server lifecycle
+  // ==========================================================================
+  // MCP Server Lifecycle Management
+  // ==========================================================================
+
   const setMCPServerActive = (active: boolean) => {
     mcpServerActive = active;
     if (active) {
@@ -38,12 +83,26 @@ export function createHttpServer(tools: RobloxStudioTools, bridge: BridgeService
     return pluginConnected && (Date.now() - lastPluginActivity < 10000);
   };
 
+  // ==========================================================================
+  // Middleware Setup
+  // ==========================================================================
+
   app.use(cors());
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+  // Track MCP activity for all MCP endpoints
+  app.use('/mcp/*', (_req: Request, _res: Response, next: NextFunction) => {
+    trackMCPActivity();
+    next();
+  });
+
+  // ==========================================================================
+  // Core Endpoints (Health, Status, Polling)
+  // ==========================================================================
+
   // Health check endpoint
-  app.get('/health', (req, res) => {
+  app.get('/health', (_req: Request, res: Response) => {
     res.json({ 
       status: 'ok', 
       service: 'robloxstudio-mcp',
@@ -54,22 +113,21 @@ export function createHttpServer(tools: RobloxStudioTools, bridge: BridgeService
   });
 
   // Plugin readiness endpoint
-  app.post('/ready', (req, res) => {
+  app.post('/ready', (_req: Request, res: Response) => {
     pluginConnected = true;
     lastPluginActivity = Date.now();
     res.json({ success: true });
   });
 
   // Plugin disconnect endpoint
-  app.post('/disconnect', (req, res) => {
+  app.post('/disconnect', (_req: Request, res: Response) => {
     pluginConnected = false;
-    // Clear any pending requests when plugin disconnects
     bridge.clearAllPendingRequests();
     res.json({ success: true });
   });
 
   // Enhanced status endpoint
-  app.get('/status', (req, res) => {
+  app.get('/status', (_req: Request, res: Response) => {
     res.json({ 
       pluginConnected,
       mcpServerActive: isMCPServerActive(),
@@ -78,9 +136,9 @@ export function createHttpServer(tools: RobloxStudioTools, bridge: BridgeService
     });
   });
 
-  // Enhanced polling endpoint for Studio plugin
-  app.get('/poll', (req, res) => {
-    // Always track that plugin is polling (shows it's trying to connect)
+  // Polling endpoint for Studio plugin
+  app.get('/poll', (_req: Request, res: Response) => {
+    // Track plugin activity
     if (!pluginConnected) {
       pluginConnected = true;
     }
@@ -116,7 +174,7 @@ export function createHttpServer(tools: RobloxStudioTools, bridge: BridgeService
   });
 
   // Response endpoint for Studio plugin
-  app.post('/response', (req, res) => {
+  app.post('/response', (req: Request, res: Response) => {
     const { requestId, response, error } = req.body;
     
     if (error) {
@@ -128,353 +186,95 @@ export function createHttpServer(tools: RobloxStudioTools, bridge: BridgeService
     res.json({ success: true });
   });
 
-  // Middleware to track MCP activity for all MCP endpoints
-  app.use('/mcp/*', (req, res, next) => {
-    trackMCPActivity();
-    next();
-  });
+  // ==========================================================================
+  // MCP Tool Routes - Using Route Factory
+  // ==========================================================================
 
-  // MCP tool proxy endpoints - these will be called by AI tools
-  app.post('/mcp/get_file_tree', async (req, res) => {
-    try {
-      const result = await tools.getFileTree(req.body.path);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
+  const toolRoutes: RouteDefinition[] = [
+    // File System / Instance Hierarchy
+    { path: '/mcp/get_file_tree', handler: (body) => tools.getFileTree(body.path as string) },
+    { path: '/mcp/search_files', handler: (body) => tools.searchFiles(body.query as string, body.searchType as string) },
+    
+    // Studio Context
+    { path: '/mcp/get_place_info', handler: () => tools.getPlaceInfo() },
+    { path: '/mcp/get_services', handler: (body) => tools.getServices(body.serviceName as string) },
+    { path: '/mcp/search_objects', handler: (body) => tools.searchObjects(body.query as string, body.searchType as string, body.propertyName as string) },
+    
+    // Property & Instance
+    { path: '/mcp/get_instance_properties', handler: (body) => tools.getInstanceProperties(body.instancePath as string) },
+    { path: '/mcp/get_instance_children', handler: (body) => tools.getInstanceChildren(body.instancePath as string) },
+    { path: '/mcp/search_by_property', handler: (body) => tools.searchByProperty(body.propertyName as string, body.propertyValue as string) },
+    { path: '/mcp/get_class_info', handler: (body) => tools.getClassInfo(body.className as string) },
+    
+    // Project Structure
+    { path: '/mcp/get_project_structure', handler: (body) => tools.getProjectStructure(body.path as string, body.maxDepth as number, body.scriptsOnly as boolean) },
+    
+    // Property Modification
+    { path: '/mcp/set_property', handler: (body) => tools.setProperty(body.instancePath as string, body.propertyName as string, body.propertyValue) },
+    { path: '/mcp/mass_set_property', handler: (body) => tools.massSetProperty(body.paths as string[], body.propertyName as string, body.propertyValue) },
+    { path: '/mcp/mass_get_property', handler: (body) => tools.massGetProperty(body.paths as string[], body.propertyName as string) },
+    
+    // Object Creation/Deletion
+    { path: '/mcp/create_object', handler: (body) => tools.createObject(body.className as string, body.parent as string, body.name as string) },
+    { path: '/mcp/create_object_with_properties', handler: (body) => tools.createObjectWithProperties(body.className as string, body.parent as string, body.name as string, body.properties as Record<string, unknown>) },
+    { path: '/mcp/mass_create_objects', handler: (body) => tools.massCreateObjects(body.objects as Array<{className: string, parent: string, name?: string}>) },
+    { path: '/mcp/mass_create_objects_with_properties', handler: (body) => tools.massCreateObjectsWithProperties(body.objects as Array<{className: string, parent: string, name?: string, properties?: Record<string, unknown>}>) },
+    { path: '/mcp/delete_object', handler: (body) => tools.deleteObject(body.instancePath as string) },
+    
+    // Smart Duplication
+    { path: '/mcp/smart_duplicate', handler: (body) => tools.smartDuplicate(body.instancePath as string, body.count as number, body.options as Parameters<typeof tools.smartDuplicate>[2]) },
+    { path: '/mcp/mass_duplicate', handler: (body) => tools.massDuplicate(body.duplications as Parameters<typeof tools.massDuplicate>[0]) },
+    
+    // Calculated/Relative Properties
+    { path: '/mcp/set_calculated_property', handler: (body) => tools.setCalculatedProperty(body.paths as string[], body.propertyName as string, body.formula as string, body.variables as Record<string, unknown>) },
+    { path: '/mcp/set_relative_property', handler: (body) => tools.setRelativeProperty(body.paths as string[], body.propertyName as string, body.operation as 'add' | 'multiply' | 'divide' | 'subtract' | 'power', body.value, body.component as 'X' | 'Y' | 'Z') },
+    
+    // Script Management
+    { path: '/mcp/get_script_source', handler: (body) => tools.getScriptSource(body.instancePath as string, body.startLine as number, body.endLine as number) },
+    { path: '/mcp/set_script_source', handler: (body) => tools.setScriptSource(body.instancePath as string, body.source as string) },
+    { path: '/mcp/edit_script_lines', handler: (body) => tools.editScriptLines(body.instancePath as string, body.startLine as number, body.endLine as number, body.newContent as string) },
+    { path: '/mcp/insert_script_lines', handler: (body) => tools.insertScriptLines(body.instancePath as string, body.afterLine as number, body.newContent as string) },
+    { path: '/mcp/delete_script_lines', handler: (body) => tools.deleteScriptLines(body.instancePath as string, body.startLine as number, body.endLine as number) },
+    
+    // Attributes
+    { path: '/mcp/get_attribute', handler: (body) => tools.getAttribute(body.instancePath as string, body.attributeName as string) },
+    { path: '/mcp/set_attribute', handler: (body) => tools.setAttribute(body.instancePath as string, body.attributeName as string, body.attributeValue, body.valueType as string) },
+    { path: '/mcp/get_attributes', handler: (body) => tools.getAttributes(body.instancePath as string) },
+    { path: '/mcp/delete_attribute', handler: (body) => tools.deleteAttribute(body.instancePath as string, body.attributeName as string) },
+    
+    // Tags (CollectionService)
+    { path: '/mcp/get_tags', handler: (body) => tools.getTags(body.instancePath as string) },
+    { path: '/mcp/add_tag', handler: (body) => tools.addTag(body.instancePath as string, body.tagName as string) },
+    { path: '/mcp/remove_tag', handler: (body) => tools.removeTag(body.instancePath as string, body.tagName as string) },
+    { path: '/mcp/get_tagged', handler: (body) => tools.getTagged(body.tagName as string) },
+    
+    // Selection
+    { path: '/mcp/get_selection', handler: () => tools.getSelection() },
+    
+    // Creator Store / Assets
+    { path: '/mcp/insert_asset', handler: (body) => tools.insertAsset(body.assetId as number, body.parent as string, body.position as [number, number, number], body.name as string) },
+    { path: '/mcp/insert_multiple_assets', handler: (body) => tools.insertMultipleAssets(body.assets as Array<{assetId: number, parent: string, position?: [number, number, number], name?: string}>) },
+    { path: '/mcp/get_asset_info', handler: (body) => tools.getAssetInfo(body.assetId as number) },
+    { path: '/mcp/search_asset_catalog', handler: (body) => tools.searchAssetCatalog(body.query as string, body.category as string, body.maxResults as number) },
+    { path: '/mcp/list_asset_categories', handler: () => tools.listAssetCategories() },
+  ];
 
+  // Register all tool routes
+  registerToolRoutes(app, toolRoutes);
 
-  app.post('/mcp/search_files', async (req, res) => {
-    try {
-      const result = await tools.searchFiles(req.body.query, req.body.searchType);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
+  // ==========================================================================
+  // Expose Server Control Methods
+  // ==========================================================================
 
-
-  app.post('/mcp/get_place_info', async (req, res) => {
-    try {
-      const result = await tools.getPlaceInfo();
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/get_services', async (req, res) => {
-    try {
-      const result = await tools.getServices(req.body.serviceName);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-
-  app.post('/mcp/search_objects', async (req, res) => {
-    try {
-      const result = await tools.searchObjects(req.body.query, req.body.searchType, req.body.propertyName);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/get_instance_properties', async (req, res) => {
-    try {
-      const result = await tools.getInstanceProperties(req.body.instancePath);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/get_instance_children', async (req, res) => {
-    try {
-      const result = await tools.getInstanceChildren(req.body.instancePath);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/search_by_property', async (req, res) => {
-    try {
-      const result = await tools.searchByProperty(req.body.propertyName, req.body.propertyValue);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/get_class_info', async (req, res) => {
-    try {
-      const result = await tools.getClassInfo(req.body.className);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/mass_set_property', async (req, res) => {
-    try {
-      const result = await tools.massSetProperty(req.body.paths, req.body.propertyName, req.body.propertyValue);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/mass_get_property', async (req, res) => {
-    try {
-      const result = await tools.massGetProperty(req.body.paths, req.body.propertyName);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/create_object_with_properties', async (req, res) => {
-    try {
-      const result = await tools.createObjectWithProperties(req.body.className, req.body.parent, req.body.name, req.body.properties);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/mass_create_objects', async (req, res) => {
-    try {
-      const result = await tools.massCreateObjects(req.body.objects);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/mass_create_objects_with_properties', async (req, res) => {
-    try {
-      const result = await tools.massCreateObjectsWithProperties(req.body.objects);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/get_project_structure', async (req, res) => {
-    try {
-      const result = await tools.getProjectStructure(req.body.path, req.body.maxDepth, req.body.scriptsOnly);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  // Script management endpoints (parity with tools)
-  app.post('/mcp/get_script_source', async (req, res) => {
-    try {
-      const result = await tools.getScriptSource(req.body.instancePath);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/set_script_source', async (req, res) => {
-    try {
-      const result = await tools.setScriptSource(req.body.instancePath, req.body.source);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/get_selection', async (req, res) => {
-    try {
-      const result = await tools.getSelection();
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  // Property modification endpoint
-  app.post('/mcp/set_property', async (req, res) => {
-    try {
-      const result = await tools.setProperty(req.body.instancePath, req.body.propertyName, req.body.propertyValue);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  // Object creation/deletion endpoints
-  app.post('/mcp/create_object', async (req, res) => {
-    try {
-      const result = await tools.createObject(req.body.className, req.body.parent, req.body.name);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/delete_object', async (req, res) => {
-    try {
-      const result = await tools.deleteObject(req.body.instancePath);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  // Smart duplication endpoints
-  app.post('/mcp/smart_duplicate', async (req, res) => {
-    try {
-      const result = await tools.smartDuplicate(req.body.instancePath, req.body.count, req.body.options);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/mass_duplicate', async (req, res) => {
-    try {
-      const result = await tools.massDuplicate(req.body.duplications);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  // Calculated/relative property endpoints
-  app.post('/mcp/set_calculated_property', async (req, res) => {
-    try {
-      const result = await tools.setCalculatedProperty(req.body.paths, req.body.propertyName, req.body.formula, req.body.variables);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/set_relative_property', async (req, res) => {
-    try {
-      const result = await tools.setRelativeProperty(req.body.paths, req.body.propertyName, req.body.operation, req.body.value, req.body.component);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  // Partial script editing endpoints
-  app.post('/mcp/edit_script_lines', async (req, res) => {
-    try {
-      const result = await tools.editScriptLines(req.body.instancePath, req.body.startLine, req.body.endLine, req.body.newContent);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/insert_script_lines', async (req, res) => {
-    try {
-      const result = await tools.insertScriptLines(req.body.instancePath, req.body.afterLine, req.body.newContent);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/delete_script_lines', async (req, res) => {
-    try {
-      const result = await tools.deleteScriptLines(req.body.instancePath, req.body.startLine, req.body.endLine);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  // Attribute endpoints
-  app.post('/mcp/get_attribute', async (req, res) => {
-    try {
-      const result = await tools.getAttribute(req.body.instancePath, req.body.attributeName);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/set_attribute', async (req, res) => {
-    try {
-      const result = await tools.setAttribute(req.body.instancePath, req.body.attributeName, req.body.attributeValue, req.body.valueType);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/get_attributes', async (req, res) => {
-    try {
-      const result = await tools.getAttributes(req.body.instancePath);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/delete_attribute', async (req, res) => {
-    try {
-      const result = await tools.deleteAttribute(req.body.instancePath, req.body.attributeName);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  // Tag (CollectionService) endpoints
-  app.post('/mcp/get_tags', async (req, res) => {
-    try {
-      const result = await tools.getTags(req.body.instancePath);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/add_tag', async (req, res) => {
-    try {
-      const result = await tools.addTag(req.body.instancePath, req.body.tagName);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/remove_tag', async (req, res) => {
-    try {
-      const result = await tools.removeTag(req.body.instancePath, req.body.tagName);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  app.post('/mcp/get_tagged', async (req, res) => {
-    try {
-      const result = await tools.getTagged(req.body.tagName);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  // Add methods to control and check server status
-  (app as any).isPluginConnected = isPluginConnected;
-  (app as any).setMCPServerActive = setMCPServerActive;
-  (app as any).isMCPServerActive = isMCPServerActive;
-  (app as any).trackMCPActivity = trackMCPActivity;
+  (app as Express & { 
+    isPluginConnected: typeof isPluginConnected;
+    setMCPServerActive: typeof setMCPServerActive;
+    isMCPServerActive: typeof isMCPServerActive;
+    trackMCPActivity: typeof trackMCPActivity;
+  }).isPluginConnected = isPluginConnected;
+  (app as Express & { setMCPServerActive: typeof setMCPServerActive }).setMCPServerActive = setMCPServerActive;
+  (app as Express & { isMCPServerActive: typeof isMCPServerActive }).isMCPServerActive = isMCPServerActive;
+  (app as Express & { trackMCPActivity: typeof trackMCPActivity }).trackMCPActivity = trackMCPActivity;
 
   return app;
 }

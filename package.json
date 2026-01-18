@@ -1,19 +1,21 @@
 {
-  "name": "robloxstudio-mcp",
-  "version": "1.9.0",
-  "description": "MCP Server for Roblox Studio Integration - Access Studio data, scripts, and objects through AI tools",
+  "name": "roblox-mcp",
+  "version": "2.0.0",
+  "description": "MCP Server for Roblox Studio Integration - Modified fork with enhanced features - Access Studio data, scripts, and objects through AI tools",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
-    "robloxstudio-mcp": "dist/index.js"
+    "roblox-mcp": "dist/index.js"
   },
   "files": [
     "dist/**/*",
+    "src/data/**/*",
     "studio-plugin/**/*",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run copy-data",
+    "copy-data": "node -e \"const fs=require('fs');const p=require('path');fs.mkdirSync(p.join('dist','data'),{recursive:true});fs.copyFileSync(p.join('src','data','asset-catalog.json'),p.join('dist','data','asset-catalog.json'));\"",
     "build:plugin": "cd studio-plugin && rojo build default.project.json --output MCPPlugin.rbxmx",
     "build:all": "npm run build && npm run build:plugin",
     "dev": "tsx src/index.ts",
@@ -35,15 +37,15 @@
     "model-context-protocol",
     "game-development"
   ],
-  "author": "",
+  "author": "DefinitelyNotJosh1",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/boshyxd/robloxstudio-mcp.git"
+    "url": "git+https://github.com/DefinitelyNotJosh1/robloxstudio-mcp.git"
   },
-  "homepage": "https://github.com/boshyxd/robloxstudio-mcp#readme",
+  "homepage": "https://github.com/DefinitelyNotJosh1/robloxstudio-mcp#readme",
   "bugs": {
-    "url": "https://github.com/boshyxd/robloxstudio-mcp/issues"
+    "url": "https://github.com/DefinitelyNotJosh1/robloxstudio-mcp/issues"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.6.0",

@@ -1,4 +1,9 @@
-local HttpService = game:GetService("HttpService")
+<roblox version="4">
+  <Item class="Script" referent="0">
+    <Properties>
+      <string name="Name">MCPPlugin</string>
+      <token name="RunContext">0</token>
+      <string name="Source"><![CDATA[local HttpService = game:GetService("HttpService")
 local StudioService = game:GetService("StudioService")
 local Selection = game:GetService("Selection")
 local RunService = game:GetService("RunService")
@@ -6,7 +11,7 @@ local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local ScriptEditorService = game:GetService("ScriptEditorService")
 local CollectionService = game:GetService("CollectionService")
 
-local CURRENT_VERSION = "2.0.0"
+local CURRENT_VERSION = "1.9.0"
 
 local toolbar = plugin:CreateToolbar("MCP Integration")
 local button =
@@ -16,12 +21,7 @@ local pluginState = {
 	serverUrl = "http://localhost:3002",
 	mcpServerUrl = "http://localhost:3001",
 	isActive = false,
-	-- Adaptive polling configuration
-	basePollInterval = 0.1,      -- Fast polling when active (100ms)
-	idlePollInterval = 1.0,      -- Slow polling when idle (1s)
-	idleThreshold = 5,           -- Seconds before going idle
-	lastRequestTime = 0,         -- Last time a request was received
-	pollInterval = 0.5,          -- Current poll interval (dynamically adjusted)
+	pollInterval = 0.5,
 	lastPoll = 0,
 	consecutiveFailures = 0,
 	maxFailuresBeforeError = 50,
@@ -457,15 +457,6 @@ local function safeCall(func, ...)
 	end
 end
 
--- Adaptive polling: returns faster interval when active, slower when idle
-local function getCurrentPollInterval()
-	local timeSinceLastRequest = tick() - pluginState.lastRequestTime
-	if timeSinceLastRequest > pluginState.idleThreshold then
-		return pluginState.idlePollInterval
-	end
-	return pluginState.basePollInterval
-end
-
 local function getInstancePath(instance)
 	if not instance or instance == game then
 		return "game"
@@ -663,8 +654,6 @@ local function pollForRequests()
 		end
 
 		if data.request and mcpConnected then
-			-- Track request activity for adaptive polling
-			pluginState.lastRequestTime = tick()
 			local response = processRequest(data.request)
 			sendResponse(data.requestId, response)
 		end
@@ -829,13 +818,6 @@ processRequest = function(request)
 	-- Selection endpoints
 	elseif endpoint == "/api/get-selection" then
 		return handlers.getSelection(data)
-	-- Asset insertion endpoints
-	elseif endpoint == "/api/insert-asset" then
-		return handlers.insertAsset(data)
-	elseif endpoint == "/api/insert-multiple-assets" then
-		return handlers.insertMultipleAssets(data)
-	elseif endpoint == "/api/get-asset-info" then
-		return handlers.getAssetInfo(data)
 	else
 		return { error = "Unknown endpoint: " .. tostring(endpoint) }
 	end
@@ -3150,191 +3132,6 @@ handlers.getSelection = function(requestData)
 	}
 end
 
--- Asset insertion handlers (Creator Store / Toolbox)
-local InsertService = game:GetService("InsertService")
-
-handlers.insertAsset = function(requestData)
-	local assetId = tonumber(requestData.assetId)
-	local parentPath = requestData.parent
-	local position = requestData.position
-	local customName = requestData.name
-
-	if not assetId or not parentPath then
-		return { error = "Asset ID and parent path are required" }
-	end
-	
-	-- Debug: log what we're trying to load
-	print("[MCP] Attempting to load asset ID:", assetId, "Type:", type(assetId))
-
-	local parentInstance = getInstanceByPath(parentPath)
-	if not parentInstance then
-		return { error = "Parent instance not found: " .. parentPath }
-	end
-
-	local success, result = pcall(function()
-		local assetModel = InsertService:LoadAsset(assetId)
-		
-		if not assetModel then
-			error("Failed to load asset - asset may not exist or you may not have permission")
-		end
-
-		local insertedItems = {}
-		
-		for _, child in ipairs(assetModel:GetChildren()) do
-			-- Set custom name if provided
-			if customName then
-				child.Name = customName
-			end
-			
-			-- Set position if provided and applicable
-			if position and (child:IsA("BasePart") or child:IsA("Model")) then
-				if child:IsA("Model") then
-					if child.PrimaryPart then
-						child:SetPrimaryPartCFrame(CFrame.new(position[1] or 0, position[2] or 0, position[3] or 0))
-					elseif child:FindFirstChildWhichIsA("BasePart") then
-						-- If no PrimaryPart, try to move the first BasePart
-						local firstPart = child:FindFirstChildWhichIsA("BasePart")
-						local offset = firstPart.Position
-						child:MoveTo(Vector3.new(position[1] or 0, position[2] or 0, position[3] or 0))
-					end
-				elseif child:IsA("BasePart") then
-					child.Position = Vector3.new(position[1] or 0, position[2] or 0, position[3] or 0)
-				end
-			end
-			
-			-- Move to parent
-			child.Parent = parentInstance
-			
-			table.insert(insertedItems, {
-				name = child.Name,
-				className = child.ClassName,
-				path = getInstancePath(child)
-			})
-		end
-		
-		-- Clean up the temporary container
-		assetModel:Destroy()
-		
-		ChangeHistoryService:SetWaypoint("Insert asset " .. assetId)
-		
-		return insertedItems
-	end)
-
-	if success then
-		return {
-			success = true,
-			assetId = assetId,
-			parent = parentPath,
-			inserted = result,
-			count = #result,
-			message = "Asset inserted successfully"
-		}
-	else
-		return {
-			error = "Failed to insert asset: " .. tostring(result),
-			assetId = assetId,
-			note = "Make sure the asset ID is valid and you have permission to access it"
-		}
-	end
-end
-
-handlers.insertMultipleAssets = function(requestData)
-	local assets = requestData.assets
-
-	if not assets or type(assets) ~= "table" or #assets == 0 then
-		return { error = "Assets array is required" }
-	end
-
-	local results = {}
-	local successCount = 0
-	local failureCount = 0
-
-	for _, assetData in ipairs(assets) do
-		local result = handlers.insertAsset(assetData)
-		table.insert(results, result)
-		
-		if result.success then
-			successCount = successCount + (result.count or 1)
-		else
-			failureCount = failureCount + 1
-		end
-	end
-
-	if successCount > 0 then
-		ChangeHistoryService:SetWaypoint("Insert multiple assets (" .. successCount .. " items)")
-	end
-
-	return {
-		results = results,
-		summary = {
-			totalAssets = #assets,
-			totalInserted = successCount,
-			failed = failureCount
-		}
-	}
-end
-
-handlers.getAssetInfo = function(requestData)
-	local assetId = requestData.assetId
-
-	if not assetId then
-		return { error = "Asset ID is required" }
-	end
-
-	-- Try to load the asset to get its info
-	local success, result = pcall(function()
-		local assetModel = InsertService:LoadAsset(assetId)
-		
-		if not assetModel then
-			error("Failed to load asset")
-		end
-
-		local info = {
-			assetId = assetId,
-			contents = {}
-		}
-
-		for _, child in ipairs(assetModel:GetChildren()) do
-			local childInfo = {
-				name = child.Name,
-				className = child.ClassName,
-				childCount = #child:GetChildren()
-			}
-			
-			if child:IsA("Model") then
-				childInfo.primaryPart = child.PrimaryPart and child.PrimaryPart.Name or nil
-			end
-			
-			if child:IsA("BasePart") then
-				childInfo.size = {X = child.Size.X, Y = child.Size.Y, Z = child.Size.Z}
-			end
-			
-			table.insert(info.contents, childInfo)
-		end
-
-		info.totalItems = #info.contents
-		
-		-- Clean up
-		assetModel:Destroy()
-		
-		return info
-	end)
-
-	if success then
-		return {
-			success = true,
-			assetInfo = result,
-			note = "Asset loaded successfully. Use insert_asset to add it to your game."
-		}
-	else
-		return {
-			error = "Failed to get asset info: " .. tostring(result),
-			assetId = assetId,
-			note = "Make sure the asset ID is valid and you have permission to access it"
-		}
-	end
-end
-
 local function updateUIState()
 	if pluginState.isActive then
 		statusLabel.Text = "Connecting..."
@@ -3429,11 +3226,8 @@ local function activatePlugin()
 	if not pluginState.connection then
 		pluginState.connection = RunService.Heartbeat:Connect(function()
 			local now = tick()
-			-- Use adaptive polling: fast when active, slow when idle
-			-- If there are consecutive failures, use retry delay instead
-			local currentInterval = pluginState.consecutiveFailures > 5 
-				and pluginState.currentRetryDelay
-				or getCurrentPollInterval()
+			local currentInterval = pluginState.consecutiveFailures > 5 and pluginState.currentRetryDelay
+				or pluginState.pollInterval
 			if now - pluginState.lastPoll > currentInterval then
 				pluginState.lastPoll = now
 				pollForRequests()
@@ -3551,3 +3345,7 @@ end)
 
 updateUIState()
 checkForUpdates()
+]]></string>
+    </Properties>
+  </Item>
+</roblox>

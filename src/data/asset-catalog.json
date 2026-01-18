@@ -1,0 +1,115 @@
+{
+  "version": "2.1.0",
+  "lastUpdated": "2026-01-18",
+  "description": "Comprehensive catalog of verified Roblox assets. Contains classic and community assets that work with Roblox Studio MCP tools.",
+  "note": "Assets verified to work with InsertService. All assets in verified categories have been tested and confirmed working. Large collections contain multiple sub-assets.",
+  "categories": {
+    "weapons": [
+      { "id": 4842212980, "name": "SMG Pack", "description": "Pack of 3 SMG (Submachine Gun) tools", "tags": ["weapon", "ranged", "smg", "pack"], "children": 15, "verified": true },
+      { "id": 4842197274, "name": "Pistol Pack", "description": "Pack of 3 pistol tools", "tags": ["weapon", "ranged", "pistol", "pack"], "children": 15, "verified": true },
+      { "id": 4842215723, "name": "Shotgun Pack", "description": "Pack of 3 shotgun tools", "tags": ["weapon", "ranged", "shotgun", "pack"], "children": 15, "verified": true },
+      { "id": 47586, "name": "Classic Timebomb", "description": "Classic timebomb tool with explosion mechanics", "tags": ["weapon", "explosive", "classic", "timebomb"], "children": 4, "verified": true },
+      { "id": 47637, "name": "Rocket Launcher", "description": "Classic rocket launcher tool", "tags": ["weapon", "ranged", "rocket", "launcher", "classic"], "children": 6, "verified": true },
+      { "id": 47433, "name": "Classic Sword", "description": "Classic sword tool for melee combat", "tags": ["weapon", "melee", "sword", "classic"], "children": 4, "verified": true },
+      { "id": 4842207161, "name": "Assault Rifle Pack", "description": "Pack of 3 assault rifle tools (AR, AR2, AR3) with detailed models and mechanics", "tags": ["weapon", "ranged", "assault rifle", "ar", "pack"], "children": 15, "verified": true },
+      { "id": 4842218829, "name": "Sniper Rifle Pack", "description": "Pack of 3 sniper rifle tools (Sniper, Sniper2, Sniper3) with high-precision mechanics", "tags": ["weapon", "ranged", "sniper", "rifle", "pack"], "children": 15, "verified": true },
+      { "id": 4842204072, "name": "Crossbow Pack", "description": "Pack of 3 crossbow tools (Crossbow, Crossbow2, Crossbow3) with projectile mechanics", "tags": ["weapon", "ranged", "crossbow", "pack"], "children": 15, "verified": true },
+      { "id": 4842201032, "name": "Grenade Launcher Pack", "description": "Pack of 3 grenade launcher tools (Grenade Launcher, Grenade Launcher2, Grenade Launcher3)", "tags": ["weapon", "ranged", "grenade", "launcher", "explosive", "pack"], "children": 15, "verified": true },
+      { "id": 4842186817, "name": "Rocket Launcher Pack", "description": "Pack of 3 rocket launcher tools (Rocket Launcher, Rocket Launcher2, Rocket Launcher3)", "tags": ["weapon", "ranged", "rocket", "launcher", "pack"], "children": 15, "verified": true },
+      { "id": 4842190633, "name": "Railgun Pack", "description": "Pack of 3 railgun tools (Railgun, Railgun2, Railgun3) with energy-based mechanics", "tags": ["weapon", "ranged", "railgun", "energy", "pack"], "children": 15, "verified": true }
+    ],
+    "buildings": [
+      { "id": 56450063, "name": "Roof Wedge", "description": "Sloped roof wedge piece for building construction", "tags": ["building", "roof", "wedge", "construction", "architecture"], "children": 6, "verified": true },
+      { "id": 56448754, "name": "Castle Wall", "description": "Medieval castle wall part", "tags": ["building", "castle", "wall", "medieval"], "children": 0, "verified": true },
+      { "id": 56446665, "name": "Space Wall", "description": "Futuristic space-themed wall", "tags": ["building", "space", "wall", "scifi"], "children": 0, "verified": true },
+      { "id": 56446557, "name": "Space Floor Panel", "description": "Large space-themed floor panel", "tags": ["building", "space", "floor", "scifi"], "children": 1, "verified": true },
+      { "id": 56449913, "name": "House Interior TV", "description": "TV set for house interiors", "tags": ["building", "interior", "tv", "furniture"], "children": 12, "verified": true },
+      { "id": 56450261, "name": "Stairs Turn Left", "description": "Left-turning staircase model", "tags": ["building", "stairs", "interior", "architecture"], "children": 5, "verified": true },
+      { "id": 13168370735, "name": "Modular Building Kit - Modern City", "description": "Modern city building kit", "tags": ["building", "modular", "city"], "children": 3, "verified": true }
+    ],
+    "blocks": [
+      { "id": 56453053, "name": "Black Block", "description": "Basic black building block", "tags": ["building", "block", "basic", "black"], "children": 0, "verified": true },
+      { "id": 56452103, "name": "Grass Block", "description": "Grass-textured building block", "tags": ["building", "block", "grass", "nature"], "children": 0, "verified": true },
+      { "id": 115744374, "name": "Brown Block", "description": "Basic brown building block", "tags": ["building", "block", "basic", "brown"], "children": 0, "verified": true },
+      { "id": 41324945, "name": "Smooth Block Model", "description": "Smooth building block model", "tags": ["building", "block", "smooth", "basic"], "children": 0, "verified": true },
+      { "id": 65524244, "name": "Large Thin Platform", "description": "Large thin platform part", "tags": ["building", "platform", "large", "thin"], "children": 0, "verified": true }
+    ],
+    "billboards": [
+      { "id": 50494, "name": "Billboard", "description": "Basic billboard model with smooth block", "tags": ["sign", "advertisement", "display"], "children": 5, "verified": true },
+      { "id": 50482, "name": "Billboard", "description": "Basic billboard model with smooth block", "tags": ["sign", "advertisement", "display"], "children": 5, "verified": true }
+    ],
+    "characters": [
+      { "id": 267938904, "name": "Seagull", "description": "Animated seagull character with flight mechanics", "tags": ["character", "animal", "bird", "seagull", "animated"], "children": 8, "verified": true },
+      { "id": 3127241980, "name": "Godzilla", "description": "Godzilla character model", "tags": ["character", "monster", "giant", "godzilla"], "children": 10, "verified": true },
+      { "id": 3374795585, "name": "Rat", "description": "Rat character model", "tags": ["animal", "character", "npc"], "children": 6, "verified": true },
+      { "id": 170822767, "name": "Penguin", "description": "Penguin character model", "tags": ["animal", "character", "bird"], "children": 8, "verified": true },
+      { "id": 94251705, "name": "Ghost", "description": "Ghost character model", "tags": ["character", "supernatural", "npc"], "children": 10, "verified": true }
+    ],
+    "environment": [
+      { "id": 6432233485, "name": "City Road Pack", "description": "Collection of city road assets", "tags": ["roads", "urban", "environment"], "children": 46, "verified": true },
+      { "id": 6370681139, "name": "City Props Pack", "description": "Collection of city prop assets", "tags": ["urban", "props", "environment"], "children": 27, "verified": true }
+    ],
+    "furniture": [
+      { "id": 28681, "name": "Coffee Table", "description": "Detailed coffee table model", "tags": ["furniture", "table", "interior"], "children": 18, "verified": true },
+      { "id": 10847897579, "name": "House Furnishing Pack", "description": "Collection of house furnishing items", "tags": ["furniture", "house", "interior"], "children": 9, "verified": true },
+      { "id": 10840642581, "name": "House Props Pack", "description": "Collection of house prop items", "tags": ["props", "house", "interior"], "children": 9, "verified": true },
+      { "id": 10841357434, "name": "Material Variants Pack", "description": "Collection of material variant items", "tags": ["materials", "variants", "props"], "children": 17, "verified": true }
+    ],
+    "scripts": [
+      { "id": 82747762, "name": "Network Script", "description": "Network functionality script", "tags": ["script", "network", "communication"], "children": 2, "verified": true },
+      { "id": 135540594, "name": "Save Script", "description": "Data saving script", "tags": ["script", "save", "data"], "children": 0, "verified": true },
+      { "id": 201433042, "name": "Main Module", "description": "Main module script", "tags": ["script", "module", "main"], "children": 1, "verified": true },
+      { "id": 38037265, "name": "Health Scripts Pack", "description": "Health management scripts pack", "tags": ["script", "health", "pack"], "children": 1, "verified": true },
+      { "id": 11338113281, "name": "SpawnWithFriends", "description": "Spawn with friends module script", "tags": ["script", "social", "spawning"], "children": 6, "verified": true },
+      { "id": 11338008960, "name": "FriendsLocator", "description": "Friends locator module script", "tags": ["script", "social", "location"], "children": 7, "verified": true },
+      { "id": 300221, "name": "VoteKicker", "description": "Vote kicking script", "tags": ["script", "moderation", "voting"], "children": 0, "verified": true },
+      { "id": 53310, "name": "LinkedLeaderboard", "description": "Linked leaderboard script", "tags": ["script", "leaderboard", "data"], "children": 0, "verified": true }
+    ],
+    "sky": [
+      { "id": 47410, "name": "Sky", "description": "Sky object for atmosphere", "tags": ["sky", "atmosphere", "environment"], "children": 0, "verified": true },
+      { "id": 47346, "name": "Sky", "description": "Sky object for atmosphere", "tags": ["sky", "atmosphere", "environment"], "children": 0, "verified": true }
+    ],
+    "vehicles": [
+      { "id": 6418234850, "name": "SUV Pack", "description": "SUV vehicles in black, blue, and white", "tags": ["vehicle", "car", "suv"], "children": 24, "verified": true },
+      { "id": 6433272094, "name": "Dune Buggy Pack", "description": "Dune buggy vehicles in beige, blue, and orange", "tags": ["vehicle", "offroad", "dune buggy"], "children": 24, "verified": true },
+      { "id": 6433330180, "name": "Supercar Pack", "description": "Supercar vehicles in blue, green, and yellow", "tags": ["vehicle", "car", "supercar"], "children": 24, "verified": true }
+    ],
+    "checkpoints": [
+      { "id": 3110755182, "name": "Checkpoint", "description": "Checkpoint part for racing/obstacles", "tags": ["checkpoint", "racing", "obstacle"], "children": 2, "verified": true }
+    ],
+    "ufo": [
+      { "id": 59524729, "name": "UFO", "description": "UFO model with detailed parts", "tags": ["ufo", "alien", "vehicle"], "children": 40, "verified": true }
+    ],
+    "barrels": [
+      { "id": 23153987, "name": "Barrel/NuclearWaste", "description": "Nuclear waste barrel model", "tags": ["barrel", "nuclear", "hazard"], "children": 4, "verified": true },
+      { "id": 23153991, "name": "Barrel/Normal", "description": "Normal barrel model", "tags": ["barrel", "container", "basic"], "children": 4, "verified": true }
+    ],
+    "spawn": [
+      { "id": 59524313, "name": "Blue Team Spawn", "description": "Spawn location for blue team", "tags": ["spawn", "team", "blue"], "children": 2, "verified": true },
+      { "id": 53319, "name": "Blue Team Spawn", "description": "Blue team spawn location (12x12x1 studs)", "tags": ["spawn", "team", "blue", "location", "respawn"], "children": 1, "verified": true },
+      { "id": 53318, "name": "Red Team Spawn", "description": "Red team spawn location (12x12x1 studs)", "tags": ["spawn", "team", "red", "location", "respawn"], "children": 1, "verified": true },
+      { "id": 53321, "name": "Green Team Spawn", "description": "Green team spawn location (12x12x1 studs)", "tags": ["spawn", "team", "green", "location", "respawn"], "children": 1, "verified": true },
+      { "id": 53320, "name": "Yellow Team Spawn", "description": "Yellow team spawn location (12x12x1 studs)", "tags": ["spawn", "team", "yellow", "location", "respawn"], "children": 1, "verified": true },
+      { "id": 3151748715, "name": "Team Spawn Location Set", "description": "Complete set of team spawn locations for multiplayer games", "tags": ["spawn", "team", "set", "multiplayer", "location", "respawn"], "children": 8, "verified": true }
+    ],
+    "truss": [
+      { "id": 65524502, "name": "Truss", "description": "Structural truss part", "tags": ["building", "structure", "truss"], "children": 0, "verified": true },
+      { "id": 10099957, "name": "Tall Truss", "description": "Tall structural truss part", "tags": ["building", "structure", "truss"], "children": 0, "verified": true }
+    ],
+    "powerups": [
+      { "id": 34815459, "name": "Orb of Power", "description": "Power-up orb with special effects", "tags": ["powerup", "orb", "special"], "children": 1, "verified": true }
+    ],
+    "city": [
+      { "id": 6418277837, "name": "City Building Pack", "description": "Collection of various city buildings and structures", "tags": ["city", "buildings", "urban", "architecture", "pack"], "children": 22, "verified": true }
+    ],
+    "effects": [
+      { "id": 212226090, "name": "Tsunami Wave", "description": "Large tsunami wave effect using UnionOperation geometry", "tags": ["effect", "water", "wave", "tsunami", "natural disaster", "geometry"], "children": 0, "verified": true }
+    ],
+    "large_packs": [
+      { "id": 6934021345, "name": "Synty Dungeon: Complete Dungeon Pack", "description": "Complete dungeon/fantasy environment pack with walls, floors, decorations, lighting, and interactive elements", "tags": ["pack", "collection", "large", "dungeon", "fantasy", "walls", "floors", "lighting", "props", "interactive"], "content": ["Stone walls", "Floor tiles", "Torches", "Chests", "Doors", "Pillars", "Decorative elements", "Lighting fixtures"], "verified": true },
+      { "id": 6933438443, "name": "Synty Nature: Complete Nature Pack", "description": "Comprehensive nature/forest environment pack with trees, rocks, plants, terrain, and atmospheric elements", "tags": ["pack", "collection", "large", "nature", "forest", "trees", "rocks", "plants", "terrain", "atmosphere"], "content": ["Various tree types", "Rock formations", "Grass", "Flowers", "Bushes", "Terrain pieces", "Water elements", "Sky objects"], "verified": true },
+      { "id": 6933556508, "name": "Synty City: Complete Urban Pack", "description": "Full urban/city environment pack with buildings, streets, vehicles, props, and infrastructure elements", "tags": ["pack", "collection", "large", "city", "urban", "buildings", "streets", "vehicles", "infrastructure", "props"], "content": ["Buildings", "Roads", "Sidewalks", "Street lights", "Vehicles", "Signs", "Benches", "Trash cans", "Traffic signals"], "verified": true }
+    ]
+  }
+}
+  
