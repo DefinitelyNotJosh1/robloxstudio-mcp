@@ -29,7 +29,7 @@ describe('HTTP Server', () => {
       expect(response.body).toMatchObject({
         status: 'ok',
         service: 'roblox-mcp',
-        version: '2.1.0',
+        version: '2.1.1',
         pluginConnected: false,
         mcpServerActive: false,
         pendingRequests: 0

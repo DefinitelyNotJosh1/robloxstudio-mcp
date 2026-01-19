@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * Roblox Studio MCP Server v2.1.0
+ * Roblox Studio MCP Server v2.1.1
  * 
  * This server provides Model Context Protocol (MCP) tools for interacting with Roblox Studio.
  * It allows AI assistants to access Studio data, scripts, and objects through a bridge plugin.
  * 
- * v2.1.0 Changes:
+ * v2.1.1 Changes:
  * - Consolidated redundant tools for better LLM performance
  * - Added batch tool for executing multiple operations in one call
  * - Added mass attribute, tag, and script tools
@@ -43,18 +43,87 @@ class RobloxStudioMCPServer {
     this.server = new Server(
       {
         name: 'robloxstudio-mcp',
-        version: '2.1.0',
+        version: '2.1.1',
       },
       {
         capabilities: {
           tools: {},
         },
+        instructions: this.getServerInstructions(),
       }
     );
 
     this.bridge = new BridgeService();
     this.tools = new RobloxStudioTools(this.bridge);
     this.setupToolHandlers();
+  }
+
+  private getServerInstructions(): string {
+    return `ROBLOX STUDIO MCP SERVER - OPTIMAL TOOL USAGE
+
+PERFORMANCE OPTIMIZATION STRATEGIES
+
+1. Use the 'batch' tool for 3+ sequential operations to reduce roundtrips
+   Example: batch([{tool: "create_object", args: {...}}, {tool: "create_object", args: {...}}])
+
+2. Use 'mass_*' tools instead of loops for bulk operations on multiple instances
+   - mass_set_property, mass_set_properties: Set properties on multiple instances
+   - mass_get_property: Get same property from multiple instances
+   - mass_create_objects: Create multiple objects at once
+   - mass_duplicate: Perform multiple smart duplications
+   - mass_get_script_source, mass_set_script_source: Batch script operations
+   - mass_get_attributes, mass_set_attribute: Batch attribute operations
+   - mass_add_tag, mass_remove_tag: Batch tag operations
+
+3. Always use 'search_instances' before bulk operations to validate paths and targets
+   search_instances supports name, class, content, and property searches with optional scope
+
+4. For script edits: Use 'edit_script' for targeted changes (replace/insert/delete lines)
+   Use 'set_script_source' only for complete script replacement
+
+5. Use 'get_project_structure' with maxDepth parameter for hierarchical exploration
+   Default depth 3, use 5-10 for thorough exploration. Use scriptsOnly to filter.
+
+WORKFLOW PATTERNS
+
+Game Structure Analysis:
+  1. get_place_info → get_project_structure (maxDepth=5-10)
+  2. search_instances to find specific components
+  3. get_instance_properties for detailed inspection
+
+Multi-Object Creation:
+  1. Use mass_create_objects with array of objects instead of multiple create_object calls
+  2. Use batch with multiple operations if different object types or parents
+
+Bulk Property Updates:
+  1. Use mass_set_properties (multiple properties) or mass_set_property (single property)
+  2. For calculated values: set_calculated_property with formula (e.g., "index * 50")
+  3. For relative changes: set_relative_property (add, multiply, divide, subtract, power)
+
+Script Management:
+  1. mass_get_script_source to read multiple scripts
+  2. edit_script for targeted changes (operation: replace/insert/delete)
+  3. mass_set_script_source to update multiple scripts
+
+Tag/Attribute Operations:
+  1. Use mass_add_tag/mass_remove_tag for batch CollectionService operations
+  2. Use mass_set_attribute/mass_get_attributes for batch attribute operations
+  3. get_tagged to find all instances with a specific tag
+
+Smart Duplication:
+  1. smart_duplicate for single object with variations (name pattern, position/rotation offsets)
+  2. mass_duplicate for multiple duplications at once
+
+Asset Integration:
+  1. search_asset_catalog to find curated assets (local catalog)
+  2. insert_multiple_assets for bulk asset insertion instead of repeated insert_asset
+
+CONSTRAINTS & LIMITATIONS
+- HTTP requests must be enabled in Roblox Studio Game Settings (Security tab)
+- Plugin must be connected in Studio before operations can execute
+- Search results are cached for 5 minutes; invalidate with new operations
+- Property operations support standard Roblox types (Vector3, Color3, UDim2, BrickColor)
+- Mass operations require non-empty arrays`;
   }
 
   private setupToolHandlers() {

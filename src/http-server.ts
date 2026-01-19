@@ -132,7 +132,7 @@ export function createHttpServer(tools: RobloxStudioTools, bridge: BridgeService
     res.json({ 
       status: 'ok', 
       service: 'roblox-mcp',
-      version: '2.1.0',
+      version: '2.1.1',
       pluginConnected,
       mcpServerActive: isMCPServerActive(),
       uptime: mcpServerActive ? Date.now() - mcpServerStartTime : 0,

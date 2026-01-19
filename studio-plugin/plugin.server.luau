@@ -6,7 +6,7 @@ local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local ScriptEditorService = game:GetService("ScriptEditorService")
 local CollectionService = game:GetService("CollectionService")
 
-local CURRENT_VERSION = "2.1.0"
+local CURRENT_VERSION = "2.1.1"
 
 local toolbar = plugin:CreateToolbar("MCP Integration")
 local button =

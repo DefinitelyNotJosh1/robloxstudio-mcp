@@ -46,7 +46,7 @@ It's a bug I'll try to fix, but isn't at the front of my priorities due to the e
 
 The MCP server provides 40+ tools organized into categories:
 
-### 🚀 **Batch Operations (New in v2.1.0)**
+### 🚀 **Batch Operations (New in v2.1.1)**
 - `batch` - Execute multiple tool operations in a single call (reduces roundtrips, improves performance)
 
 ### 🏗️ **Instance Hierarchy & Navigation**
@@ -113,7 +113,7 @@ Ask things like:
 - *"Optimize this movement script"*
 - *"Search for all parts with CanCollide = false"*
 
-### 🔥 **v2.1.0 Batch Example**
+### 🔥 **v2.1.1 Batch Example**
 
 Execute multiple operations in one call:
 ```
@@ -169,9 +169,9 @@ npm run dev
 
 ---
 
-**v2.1.0** — Consolidated tools, batch execution, mass operations, smart duplication, calculated properties (Modified Fork)
+**v2.1.1** — Consolidated tools, batch execution, mass operations, smart duplication, calculated properties (Modified Fork)
 
-**Changes in v2.1.0:**
+**Changes in v2.1.1:**
 - **Tool consolidation** - Reduced tool count while maintaining functionality (better LLM performance)
 - **Batch tool** - Execute multiple operations in a single call
 - **New mass tools** - `mass_set_properties`, `mass_get_script_source`, `mass_set_script_source`, `mass_get_attributes`, `mass_set_attribute`, `mass_add_tag`, `mass_remove_tag`

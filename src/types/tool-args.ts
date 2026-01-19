@@ -2,7 +2,7 @@
  * TypeScript interfaces for MCP tool arguments
  * Provides type safety and better IDE support
  * 
- * v2.1.0 - Consolidated tools and batch support
+ * v2.1.1 - Consolidated tools and batch support
  */
 
 // =============================================================================
