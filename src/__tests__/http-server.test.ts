@@ -28,9 +28,11 @@ describe('HTTP Server', () => {
 
       expect(response.body).toMatchObject({
         status: 'ok',
-        service: 'robloxstudio-mcp',
+        service: 'roblox-mcp',
+        version: '2.1.0',
         pluginConnected: false,
-        mcpServerActive: false
+        mcpServerActive: false,
+        pendingRequests: 0
       });
     });
   });
@@ -61,7 +63,6 @@ describe('HTTP Server', () => {
 
     test('should clear pending requests on disconnect', async () => {
       // Add some pending requests
-      // Attach catch handlers to prevent unhandled rejection warnings
       const p1 = bridge.sendRequest('/api/test1', {});
       const p2 = bridge.sendRequest('/api/test2', {});
       p1.catch(() => {});
@@ -93,7 +94,7 @@ describe('HTTP Server', () => {
     });
   });
 
-  describe('Polling Endpoint', () => {
+  describe('Polling Endpoint (v2.0.0 Batch)', () => {
     test('should return 503 when MCP server is not active', async () => {
       const response = await request(app)
         .get('/poll')
@@ -103,46 +104,64 @@ describe('HTTP Server', () => {
         error: 'MCP server not connected',
         pluginConnected: true,
         mcpConnected: false,
-        request: null
+        requests: []
       });
     });
 
-    test('should return pending request when MCP is active', async () => {
+    test('should return batch of pending requests when MCP is active', async () => {
       // Activate MCP server
       app.setMCPServerActive(true);
 
-      // Add a pending request
-      // Attach catch handler to prevent unhandled rejection during cleanup
-      const pendingRequest = bridge.sendRequest('/api/test', { data: 'test' });
-      pendingRequest.catch(() => {});
+      // Add pending requests
+      const p1 = bridge.sendRequest('/api/test1', { data: 'test1' });
+      const p2 = bridge.sendRequest('/api/test2', { data: 'test2' });
+      p1.catch(() => {});
+      p2.catch(() => {});
 
       const response = await request(app)
-        .get('/poll')
+        .get('/poll?longPoll=false&maxBatch=10')
         .expect(200);
 
-      expect(response.body).toMatchObject({
-        request: {
-          endpoint: '/api/test',
-          data: { data: 'test' }
-        },
-        mcpConnected: true,
-        pluginConnected: true
-      });
-      expect(response.body.requestId).toBeTruthy();
+      expect(response.body.mcpConnected).toBe(true);
+      expect(response.body.pluginConnected).toBe(true);
+      expect(response.body.requests.length).toBe(2);
+      expect(response.body.batchSize).toBe(2);
+      
+      // Verify requests in order
+      expect(response.body.requests[0].request.endpoint).toBe('/api/test1');
+      expect(response.body.requests[1].request.endpoint).toBe('/api/test2');
     });
 
-    test('should return null request when no pending requests', async () => {
+    test('should respect maxBatch parameter', async () => {
+      app.setMCPServerActive(true);
+
+      // Add 5 pending requests
+      for (let i = 1; i <= 5; i++) {
+        const p = bridge.sendRequest(`/api/test${i}`, { order: i });
+        p.catch(() => {});
+      }
+
+      const response = await request(app)
+        .get('/poll?longPoll=false&maxBatch=2')
+        .expect(200);
+
+      expect(response.body.requests.length).toBe(2);
+      expect(response.body.batchSize).toBe(2);
+    });
+
+    test('should return empty requests when no pending requests', async () => {
       // Activate MCP server
       app.setMCPServerActive(true);
 
       const response = await request(app)
-        .get('/poll')
+        .get('/poll?longPoll=false')
         .expect(200);
 
       expect(response.body).toMatchObject({
-        request: null,
+        requests: [],
         mcpConnected: true,
-        pluginConnected: true
+        pluginConnected: true,
+        batchSize: 0
       });
     });
 
@@ -155,9 +174,8 @@ describe('HTTP Server', () => {
     });
   });
 
-  describe('Response Handling', () => {
-    test('should handle successful response', async () => {
-      const requestId = 'test-request-id';
+  describe('Response Handling (v2.0.0 Batch)', () => {
+    test('should handle single response (backward compatible)', async () => {
       const responseData = { result: 'success' };
 
       // Create a pending request
@@ -180,16 +198,77 @@ describe('HTTP Server', () => {
       expect(result).toEqual(responseData);
     });
 
-    test('should handle error response', async () => {
+    test('should handle batch responses', async () => {
+      // Create pending requests
+      const p1 = bridge.sendRequest('/api/test1', {});
+      const p2 = bridge.sendRequest('/api/test2', {});
+      const p3 = bridge.sendRequest('/api/test3', {});
+
+      const requests = bridge.getPendingRequests(10);
+
+      // Send batch response
+      const response = await request(app)
+        .post('/response')
+        .send({
+          responses: [
+            { requestId: requests[0].requestId, response: { result: 1 } },
+            { requestId: requests[1].requestId, response: { result: 2 } },
+            { requestId: requests[2].requestId, response: { result: 3 } }
+          ]
+        })
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.resolved).toBe(3);
+      expect(response.body.notFound).toBe(0);
+
+      // Verify all resolved
+      const results = await Promise.all([p1, p2, p3]);
+      expect(results).toEqual([{ result: 1 }, { result: 2 }, { result: 3 }]);
+    });
+
+    test('should handle mixed success/error in batch', async () => {
+      const p1 = bridge.sendRequest('/api/test1', {});
+      const p2 = bridge.sendRequest('/api/test2', {});
+      p2.catch(() => {});
+
+      const requests = bridge.getPendingRequests(10);
+
+      const response = await request(app)
+        .post('/response')
+        .send({
+          responses: [
+            { requestId: requests[0].requestId, response: { ok: true } },
+            { requestId: requests[1].requestId, error: 'Test error' }
+          ]
+        })
+        .expect(200);
+
+      expect(response.body.resolved).toBe(2);
+
+      await expect(p1).resolves.toEqual({ ok: true });
+      await expect(p2).rejects.toEqual('Test error');
+    });
+
+    test('should return 404 for non-existent single request', async () => {
+      const response = await request(app)
+        .post('/response')
+        .send({
+          requestId: 'non-existent-id',
+          response: {}
+        })
+        .expect(404);
+
+      expect(response.body.error).toContain('not found');
+    });
+
+    test('should handle error response (single)', async () => {
       const error = 'Test error message';
 
-      // Create a pending request
-      // Attach catch handler to prevent unhandled rejection warning
       const requestPromise = bridge.sendRequest('/api/test', {});
       requestPromise.catch(() => {});
       const pendingRequest = bridge.getPendingRequest();
 
-      // Send error response
       const response = await request(app)
         .post('/response')
         .send({
@@ -200,8 +279,16 @@ describe('HTTP Server', () => {
 
       expect(response.body).toEqual({ success: true });
 
-      // Check that the request was rejected
       await expect(requestPromise).rejects.toEqual(error);
+    });
+
+    test('should return 400 when neither requestId nor responses provided', async () => {
+      const response = await request(app)
+        .post('/response')
+        .send({})
+        .expect(400);
+
+      expect(response.body.error).toContain('required');
     });
   });
 
@@ -234,10 +321,14 @@ describe('HTTP Server', () => {
   });
 
   describe('Status Endpoint', () => {
-    test('should return current status', async () => {
+    test('should return current status with pending count', async () => {
       // Set up some state
       await request(app).post('/ready').expect(200);
       app.setMCPServerActive(true);
+
+      // Add a pending request
+      const p = bridge.sendRequest('/api/test', {});
+      p.catch(() => {});
 
       const response = await request(app)
         .get('/status')
@@ -245,7 +336,8 @@ describe('HTTP Server', () => {
 
       expect(response.body).toMatchObject({
         pluginConnected: true,
-        mcpServerActive: true
+        mcpServerActive: true,
+        pendingRequests: 1
       });
       expect(response.body.lastMCPActivity).toBeGreaterThan(0);
       expect(response.body.uptime).toBeGreaterThan(0);

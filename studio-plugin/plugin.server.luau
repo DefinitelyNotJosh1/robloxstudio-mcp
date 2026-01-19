@@ -6,7 +6,7 @@ local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local ScriptEditorService = game:GetService("ScriptEditorService")
 local CollectionService = game:GetService("CollectionService")
 
-local CURRENT_VERSION = "2.0.0"
+local CURRENT_VERSION = "2.1.0"
 
 local toolbar = plugin:CreateToolbar("MCP Integration")
 local button =
@@ -595,7 +595,11 @@ end
 
 local processRequest
 local sendResponse
+local sendBatchResponse
 local handlers = {}
+
+-- Endpoint to handler mapping for O(1) lookup
+local endpointHandlers = {}
 
 local function pollForRequests()
 	if not pluginState.isActive then
@@ -604,7 +608,7 @@ local function pollForRequests()
 
 	local success, result = pcall(function()
 		return HttpService:RequestAsync({
-			Url = pluginState.serverUrl .. "/poll",
+			Url = pluginState.serverUrl .. "/poll?longPoll=false&maxBatch=10",
 			Method = "GET",
 			Headers = {
 				["Content-Type"] = "application/json",
@@ -662,8 +666,31 @@ local function pollForRequests()
 			startPulseAnimation()
 		end
 
-		if data.request and mcpConnected then
-			-- Track request activity for adaptive polling
+		-- Handle batch requests (v2.0.0)
+		local requests = data.requests
+		if requests and #requests > 0 and mcpConnected then
+			pluginState.lastRequestTime = tick()
+			local responses = {}
+			for _, reqData in ipairs(requests) do
+				local requestId = reqData.requestId
+				local request = reqData.request
+				local responseData
+				local errorMsg
+				local ok, err = pcall(function()
+					responseData = processRequest(request)
+				end)
+				if not ok then
+					errorMsg = tostring(err)
+				end
+				table.insert(responses, {
+					requestId = requestId,
+					response = responseData,
+					error = errorMsg
+				})
+			end
+			sendBatchResponse(responses)
+		-- Backward compatibility: single request mode
+		elseif data.request and mcpConnected then
 			pluginState.lastRequestTime = tick()
 			local response = processRequest(data.request)
 			sendResponse(data.requestId, response)
@@ -751,91 +778,85 @@ sendResponse = function(requestId, responseData)
 	end)
 end
 
+-- Batch response for v2.0.0
+sendBatchResponse = function(responses)
+	pcall(function()
+		HttpService:RequestAsync({
+			Url = pluginState.serverUrl .. "/response",
+			Method = "POST",
+			Headers = {
+				["Content-Type"] = "application/json",
+			},
+			Body = HttpService:JSONEncode({
+				responses = responses,
+			}),
+		})
+	end)
+end
+
+-- Handler table lookup (initialized after handlers are defined)
+local function initEndpointHandlers()
+	endpointHandlers = {
+		-- Legacy endpoints (for backward compatibility)
+		["/api/file-tree"] = handlers.getFileTree,
+		["/api/search-files"] = handlers.searchFiles,
+		["/api/place-info"] = handlers.getPlaceInfo,
+		["/api/services"] = handlers.getServices,
+		["/api/search-objects"] = handlers.searchObjects,
+		["/api/instance-properties"] = handlers.getInstanceProperties,
+		["/api/instance-children"] = handlers.getInstanceChildren,
+		["/api/search-by-property"] = handlers.searchByProperty,
+		["/api/class-info"] = handlers.getClassInfo,
+		["/api/project-structure"] = handlers.getProjectStructure,
+		["/api/set-property"] = handlers.setProperty,
+		["/api/mass-set-property"] = handlers.massSetProperty,
+		["/api/mass-get-property"] = handlers.massGetProperty,
+		["/api/create-object"] = handlers.createObject,
+		["/api/mass-create-objects"] = handlers.massCreateObjects,
+		["/api/mass-create-objects-with-properties"] = handlers.massCreateObjectsWithProperties,
+		["/api/delete-object"] = handlers.deleteObject,
+		["/api/smart-duplicate"] = handlers.smartDuplicate,
+		["/api/mass-duplicate"] = handlers.massDuplicate,
+		["/api/set-calculated-property"] = handlers.setCalculatedProperty,
+		["/api/set-relative-property"] = handlers.setRelativeProperty,
+		["/api/get-script-source"] = handlers.getScriptSource,
+		["/api/set-script-source"] = handlers.setScriptSource,
+		["/api/edit-script-lines"] = handlers.editScriptLines,
+		["/api/insert-script-lines"] = handlers.insertScriptLines,
+		["/api/delete-script-lines"] = handlers.deleteScriptLines,
+		["/api/get-attribute"] = handlers.getAttribute,
+		["/api/set-attribute"] = handlers.setAttribute,
+		["/api/get-attributes"] = handlers.getAttributes,
+		["/api/delete-attribute"] = handlers.deleteAttribute,
+		["/api/get-tags"] = handlers.getTags,
+		["/api/add-tag"] = handlers.addTag,
+		["/api/remove-tag"] = handlers.removeTag,
+		["/api/get-tagged"] = handlers.getTagged,
+		["/api/get-selection"] = handlers.getSelection,
+		["/api/insert-asset"] = handlers.insertAsset,
+		["/api/insert-multiple-assets"] = handlers.insertMultipleAssets,
+		["/api/get-asset-info"] = handlers.getAssetInfo,
+		-- v2.0.0 consolidated endpoints
+		["/api/search-instances"] = handlers.searchInstances,
+		["/api/edit-script"] = handlers.editScript,
+		["/api/mass-set-properties"] = handlers.massSetProperties,
+		["/api/mass-get-script-source"] = handlers.massGetScriptSource,
+		["/api/mass-set-script-source"] = handlers.massSetScriptSource,
+		["/api/mass-get-attributes"] = handlers.massGetAttributes,
+		["/api/mass-set-attribute"] = handlers.massSetAttribute,
+		["/api/mass-add-tag"] = handlers.massAddTag,
+		["/api/mass-remove-tag"] = handlers.massRemoveTag,
+	}
+end
+
 processRequest = function(request)
 	local endpoint = request.endpoint
 	local data = request.data or {}
 
-	if endpoint == "/api/file-tree" then
-		return handlers.getFileTree(data)
-	elseif endpoint == "/api/search-files" then
-		return handlers.searchFiles(data)
-	elseif endpoint == "/api/place-info" then
-		return handlers.getPlaceInfo(data)
-	elseif endpoint == "/api/services" then
-		return handlers.getServices(data)
-	elseif endpoint == "/api/search-objects" then
-		return handlers.searchObjects(data)
-	elseif endpoint == "/api/instance-properties" then
-		return handlers.getInstanceProperties(data)
-	elseif endpoint == "/api/instance-children" then
-		return handlers.getInstanceChildren(data)
-	elseif endpoint == "/api/search-by-property" then
-		return handlers.searchByProperty(data)
-	elseif endpoint == "/api/class-info" then
-		return handlers.getClassInfo(data)
-	elseif endpoint == "/api/project-structure" then
-		return handlers.getProjectStructure(data)
-	elseif endpoint == "/api/set-property" then
-		return handlers.setProperty(data)
-	elseif endpoint == "/api/mass-set-property" then
-		return handlers.massSetProperty(data)
-	elseif endpoint == "/api/mass-get-property" then
-		return handlers.massGetProperty(data)
-	elseif endpoint == "/api/create-object" then
-		return handlers.createObject(data)
-	elseif endpoint == "/api/mass-create-objects" then
-		return handlers.massCreateObjects(data)
-	elseif endpoint == "/api/mass-create-objects-with-properties" then
-		return handlers.massCreateObjectsWithProperties(data)
-	elseif endpoint == "/api/delete-object" then
-		return handlers.deleteObject(data)
-	elseif endpoint == "/api/smart-duplicate" then
-		return handlers.smartDuplicate(data)
-	elseif endpoint == "/api/mass-duplicate" then
-		return handlers.massDuplicate(data)
-	elseif endpoint == "/api/set-calculated-property" then
-		return handlers.setCalculatedProperty(data)
-	elseif endpoint == "/api/set-relative-property" then
-		return handlers.setRelativeProperty(data)
-	elseif endpoint == "/api/get-script-source" then
-		return handlers.getScriptSource(data)
-	elseif endpoint == "/api/set-script-source" then
-		return handlers.setScriptSource(data)
-	-- Partial script editing endpoints
-	elseif endpoint == "/api/edit-script-lines" then
-		return handlers.editScriptLines(data)
-	elseif endpoint == "/api/insert-script-lines" then
-		return handlers.insertScriptLines(data)
-	elseif endpoint == "/api/delete-script-lines" then
-		return handlers.deleteScriptLines(data)
-	-- Attribute endpoints
-	elseif endpoint == "/api/get-attribute" then
-		return handlers.getAttribute(data)
-	elseif endpoint == "/api/set-attribute" then
-		return handlers.setAttribute(data)
-	elseif endpoint == "/api/get-attributes" then
-		return handlers.getAttributes(data)
-	elseif endpoint == "/api/delete-attribute" then
-		return handlers.deleteAttribute(data)
-	-- Tag endpoints
-	elseif endpoint == "/api/get-tags" then
-		return handlers.getTags(data)
-	elseif endpoint == "/api/add-tag" then
-		return handlers.addTag(data)
-	elseif endpoint == "/api/remove-tag" then
-		return handlers.removeTag(data)
-	elseif endpoint == "/api/get-tagged" then
-		return handlers.getTagged(data)
-	-- Selection endpoints
-	elseif endpoint == "/api/get-selection" then
-		return handlers.getSelection(data)
-	-- Asset insertion endpoints
-	elseif endpoint == "/api/insert-asset" then
-		return handlers.insertAsset(data)
-	elseif endpoint == "/api/insert-multiple-assets" then
-		return handlers.insertMultipleAssets(data)
-	elseif endpoint == "/api/get-asset-info" then
-		return handlers.getAssetInfo(data)
+	-- O(1) handler lookup
+	local handler = endpointHandlers[endpoint]
+	if handler then
+		return handler(data)
 	else
 		return { error = "Unknown endpoint: " .. tostring(endpoint) }
 	end
@@ -3334,6 +3355,466 @@ handlers.getAssetInfo = function(requestData)
 		}
 	end
 end
+
+-- =============================================================================
+-- v2.0.0 CONSOLIDATED AND MASS HANDLERS
+-- =============================================================================
+
+-- Consolidated search handler
+handlers.searchInstances = function(requestData)
+	local query = requestData.query
+	local searchType = requestData.searchType or "name"
+	local scope = requestData.scope
+	local propertyName = requestData.propertyName
+	local propertyValue = requestData.propertyValue
+	local maxResults = requestData.maxResults or 100
+
+	if not query then
+		return { error = "Query is required" }
+	end
+
+	local startInstance = game
+	if scope and scope ~= "" and scope ~= "game" then
+		startInstance = getInstanceByPath(scope)
+		if not startInstance then
+			return { error = "Scope not found: " .. scope }
+		end
+	end
+
+	local results = {}
+
+	local function searchRecursive(instance)
+		if #results >= maxResults then return end
+
+		local match = false
+
+		if searchType == "name" then
+			match = instance.Name:lower():find(query:lower()) ~= nil
+		elseif searchType == "class" then
+			match = instance.ClassName:lower():find(query:lower()) ~= nil
+		elseif searchType == "content" and instance:IsA("LuaSourceContainer") then
+			match = instance.Source:lower():find(query:lower()) ~= nil
+		elseif searchType == "property" and propertyName then
+			local success, value = pcall(function()
+				return tostring(instance[propertyName])
+			end)
+			if success then
+				if propertyValue then
+					match = value:lower() == tostring(propertyValue):lower()
+				else
+					match = value:lower():find(query:lower()) ~= nil
+				end
+			end
+		end
+
+		if match then
+			table.insert(results, {
+				name = instance.Name,
+				className = instance.ClassName,
+				path = getInstancePath(instance),
+				hasSource = instance:IsA("LuaSourceContainer"),
+			})
+		end
+
+		for _, child in ipairs(instance:GetChildren()) do
+			searchRecursive(child)
+		end
+	end
+
+	searchRecursive(startInstance)
+
+	return {
+		results = results,
+		query = query,
+		searchType = searchType,
+		scope = scope or "game",
+		count = #results,
+		truncated = #results >= maxResults
+	}
+end
+
+-- Consolidated script edit handler
+handlers.editScript = function(requestData)
+	local instancePath = requestData.instancePath
+	local operation = requestData.operation
+	local startLine = requestData.startLine
+	local endLine = requestData.endLine
+	local afterLine = requestData.afterLine or 0
+	local content = requestData.content
+
+	if not instancePath or not operation then
+		return { error = "Instance path and operation are required" }
+	end
+
+	if operation == "replace" then
+		return handlers.editScriptLines({
+			instancePath = instancePath,
+			startLine = startLine,
+			endLine = endLine,
+			newContent = content or ""
+		})
+	elseif operation == "insert" then
+		return handlers.insertScriptLines({
+			instancePath = instancePath,
+			afterLine = afterLine,
+			newContent = content or ""
+		})
+	elseif operation == "delete" then
+		return handlers.deleteScriptLines({
+			instancePath = instancePath,
+			startLine = startLine,
+			endLine = endLine
+		})
+	else
+		return { error = "Unknown operation: " .. tostring(operation) .. ". Use 'replace', 'insert', or 'delete'." }
+	end
+end
+
+-- Mass set multiple properties on multiple instances
+handlers.massSetProperties = function(requestData)
+	local paths = requestData.paths
+	local properties = requestData.properties
+
+	if not paths or type(paths) ~= "table" or #paths == 0 or not properties then
+		return { error = "Paths array and properties object are required" }
+	end
+
+	local results = {}
+	local successCount = 0
+	local failureCount = 0
+
+	for _, path in ipairs(paths) do
+		local instance = getInstanceByPath(path)
+		if instance then
+			local propsSet = 0
+			local propsError = {}
+			
+			for propName, propValue in pairs(properties) do
+				local success, err = pcall(function()
+					local convertedValue = convertPropertyValue(instance, propName, propValue)
+					if convertedValue ~= nil then
+						instance[propName] = convertedValue
+					else
+						instance[propName] = propValue
+					end
+				end)
+				
+				if success then
+					propsSet = propsSet + 1
+				else
+					table.insert(propsError, propName .. ": " .. tostring(err))
+				end
+			end
+			
+			if propsSet > 0 then
+				successCount = successCount + 1
+			end
+			if #propsError > 0 then
+				failureCount = failureCount + 1
+			end
+			
+			table.insert(results, {
+				path = path,
+				success = propsSet > 0,
+				propertiesSet = propsSet,
+				errors = #propsError > 0 and propsError or nil
+			})
+		else
+			failureCount = failureCount + 1
+			table.insert(results, {
+				path = path,
+				success = false,
+				error = "Instance not found"
+			})
+		end
+	end
+
+	if successCount > 0 then
+		ChangeHistoryService:SetWaypoint("Mass set properties")
+	end
+
+	return {
+		results = results,
+		summary = {
+			total = #paths,
+			succeeded = successCount,
+			failed = failureCount
+		}
+	}
+end
+
+-- Mass get script source
+handlers.massGetScriptSource = function(requestData)
+	local paths = requestData.paths
+	local startLine = requestData.startLine
+	local endLine = requestData.endLine
+
+	if not paths or type(paths) ~= "table" or #paths == 0 then
+		return { error = "Paths array is required" }
+	end
+
+	local results = {}
+	for _, path in ipairs(paths) do
+		local result = handlers.getScriptSource({
+			instancePath = path,
+			startLine = startLine,
+			endLine = endLine
+		})
+		table.insert(results, {
+			path = path,
+			success = not result.error,
+			result = result
+		})
+	end
+
+	return { results = results, count = #results }
+end
+
+-- Mass set script source
+handlers.massSetScriptSource = function(requestData)
+	local scripts = requestData.scripts
+
+	if not scripts or type(scripts) ~= "table" or #scripts == 0 then
+		return { error = "Scripts array is required" }
+	end
+
+	local results = {}
+	local successCount = 0
+	local failureCount = 0
+
+	for _, scriptData in ipairs(scripts) do
+		local result = handlers.setScriptSource({
+			instancePath = scriptData.instancePath,
+			source = scriptData.source
+		})
+		
+		if result.success then
+			successCount = successCount + 1
+		else
+			failureCount = failureCount + 1
+		end
+		
+		table.insert(results, {
+			path = scriptData.instancePath,
+			success = result.success,
+			result = result
+		})
+	end
+
+	return {
+		results = results,
+		summary = {
+			total = #scripts,
+			succeeded = successCount,
+			failed = failureCount
+		}
+	}
+end
+
+-- Mass get attributes
+handlers.massGetAttributes = function(requestData)
+	local paths = requestData.paths
+	local attributeName = requestData.attributeName
+
+	if not paths or type(paths) ~= "table" or #paths == 0 then
+		return { error = "Paths array is required" }
+	end
+
+	local results = {}
+	for _, path in ipairs(paths) do
+		local instance = getInstanceByPath(path)
+		if instance then
+			local success, result = pcall(function()
+				if attributeName then
+					local value = instance:GetAttribute(attributeName)
+					return { [attributeName] = value }
+				else
+					return instance:GetAttributes()
+				end
+			end)
+			
+			table.insert(results, {
+				path = path,
+				success = success,
+				attributes = success and result or nil,
+				error = not success and tostring(result) or nil
+			})
+		else
+			table.insert(results, {
+				path = path,
+				success = false,
+				error = "Instance not found"
+			})
+		end
+	end
+
+	return { results = results, count = #results }
+end
+
+-- Mass set attribute
+handlers.massSetAttribute = function(requestData)
+	local paths = requestData.paths
+	local attributeName = requestData.attributeName
+	local attributeValue = requestData.attributeValue
+	local valueType = requestData.valueType
+
+	if not paths or type(paths) ~= "table" or #paths == 0 or not attributeName then
+		return { error = "Paths array and attribute name are required" }
+	end
+
+	local results = {}
+	local successCount = 0
+	local failureCount = 0
+
+	-- Convert value once for efficiency
+	local value = attributeValue
+	if type(attributeValue) == "table" then
+		if attributeValue._type == "Vector3" or valueType == "Vector3" then
+			value = Vector3.new(attributeValue.X or 0, attributeValue.Y or 0, attributeValue.Z or 0)
+		elseif attributeValue._type == "Color3" or valueType == "Color3" then
+			value = Color3.new(attributeValue.R or 0, attributeValue.G or 0, attributeValue.B or 0)
+		elseif attributeValue._type == "UDim2" or valueType == "UDim2" then
+			value = UDim2.new(
+				attributeValue.X and attributeValue.X.Scale or 0,
+				attributeValue.X and attributeValue.X.Offset or 0,
+				attributeValue.Y and attributeValue.Y.Scale or 0,
+				attributeValue.Y and attributeValue.Y.Offset or 0
+			)
+		elseif attributeValue._type == "BrickColor" or valueType == "BrickColor" then
+			value = BrickColor.new(attributeValue.Name or "Medium stone grey")
+		end
+	end
+
+	for _, path in ipairs(paths) do
+		local instance = getInstanceByPath(path)
+		if instance then
+			local success, err = pcall(function()
+				instance:SetAttribute(attributeName, value)
+			end)
+			
+			if success then
+				successCount = successCount + 1
+				table.insert(results, { path = path, success = true })
+			else
+				failureCount = failureCount + 1
+				table.insert(results, { path = path, success = false, error = tostring(err) })
+			end
+		else
+			failureCount = failureCount + 1
+			table.insert(results, { path = path, success = false, error = "Instance not found" })
+		end
+	end
+
+	if successCount > 0 then
+		ChangeHistoryService:SetWaypoint("Mass set attribute " .. attributeName)
+	end
+
+	return {
+		results = results,
+		summary = {
+			total = #paths,
+			succeeded = successCount,
+			failed = failureCount
+		}
+	}
+end
+
+-- Mass add tag
+handlers.massAddTag = function(requestData)
+	local paths = requestData.paths
+	local tagName = requestData.tagName
+
+	if not paths or type(paths) ~= "table" or #paths == 0 or not tagName then
+		return { error = "Paths array and tag name are required" }
+	end
+
+	local results = {}
+	local successCount = 0
+	local failureCount = 0
+
+	for _, path in ipairs(paths) do
+		local instance = getInstanceByPath(path)
+		if instance then
+			local success, err = pcall(function()
+				CollectionService:AddTag(instance, tagName)
+			end)
+			
+			if success then
+				successCount = successCount + 1
+				table.insert(results, { path = path, success = true })
+			else
+				failureCount = failureCount + 1
+				table.insert(results, { path = path, success = false, error = tostring(err) })
+			end
+		else
+			failureCount = failureCount + 1
+			table.insert(results, { path = path, success = false, error = "Instance not found" })
+		end
+	end
+
+	if successCount > 0 then
+		ChangeHistoryService:SetWaypoint("Mass add tag " .. tagName)
+	end
+
+	return {
+		results = results,
+		summary = {
+			total = #paths,
+			succeeded = successCount,
+			failed = failureCount
+		}
+	}
+end
+
+-- Mass remove tag
+handlers.massRemoveTag = function(requestData)
+	local paths = requestData.paths
+	local tagName = requestData.tagName
+
+	if not paths or type(paths) ~= "table" or #paths == 0 or not tagName then
+		return { error = "Paths array and tag name are required" }
+	end
+
+	local results = {}
+	local successCount = 0
+	local failureCount = 0
+
+	for _, path in ipairs(paths) do
+		local instance = getInstanceByPath(path)
+		if instance then
+			local success, err = pcall(function()
+				CollectionService:RemoveTag(instance, tagName)
+			end)
+			
+			if success then
+				successCount = successCount + 1
+				table.insert(results, { path = path, success = true })
+			else
+				failureCount = failureCount + 1
+				table.insert(results, { path = path, success = false, error = tostring(err) })
+			end
+		else
+			failureCount = failureCount + 1
+			table.insert(results, { path = path, success = false, error = "Instance not found" })
+		end
+	end
+
+	if successCount > 0 then
+		ChangeHistoryService:SetWaypoint("Mass remove tag " .. tagName)
+	end
+
+	return {
+		results = results,
+		summary = {
+			total = #paths,
+			succeeded = successCount,
+			failed = failureCount
+		}
+	}
+end
+
+-- Initialize endpoint handlers after all handlers are defined
+initEndpointHandlers()
 
 local function updateUIState()
 	if pluginState.isActive then

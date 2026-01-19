@@ -1,6 +1,8 @@
 /**
  * TypeScript interfaces for MCP tool arguments
  * Provides type safety and better IDE support
+ * 
+ * v2.1.0 - Consolidated tools and batch support
  */
 
 // =============================================================================
@@ -17,16 +19,26 @@ export interface McpToolResponse {
 }
 
 // =============================================================================
-// File System / Instance Hierarchy Tools
+// Search Tools (Consolidated)
 // =============================================================================
 
-export interface GetFileTreeArgs {
-  path?: string;
+export interface SearchInstancesArgs {
+  query: string;
+  searchType?: 'name' | 'class' | 'content' | 'property';
+  scope?: string; // Instance path to search within
+  propertyName?: string; // Required when searchType is 'property'
+  propertyValue?: unknown; // Required when searchType is 'property'
+  maxResults?: number;
 }
 
-export interface SearchFilesArgs {
-  query: string;
-  searchType?: 'name' | 'type' | 'content';
+// =============================================================================
+// Hierarchy Tools (Consolidated - get_project_structure only)
+// =============================================================================
+
+export interface GetProjectStructureArgs {
+  path?: string;
+  maxDepth?: number;
+  scriptsOnly?: boolean;
 }
 
 // =============================================================================
@@ -35,12 +47,6 @@ export interface SearchFilesArgs {
 
 export interface GetServicesArgs {
   serviceName?: string;
-}
-
-export interface SearchObjectsArgs {
-  query: string;
-  searchType?: 'name' | 'class' | 'property';
-  propertyName?: string;
 }
 
 // =============================================================================
@@ -55,23 +61,8 @@ export interface GetInstanceChildrenArgs {
   instancePath: string;
 }
 
-export interface SearchByPropertyArgs {
-  propertyName: string;
-  propertyValue: string;
-}
-
 export interface GetClassInfoArgs {
   className: string;
-}
-
-// =============================================================================
-// Project Tools
-// =============================================================================
-
-export interface GetProjectStructureArgs {
-  path?: string;
-  maxDepth?: number;
-  scriptsOnly?: boolean;
 }
 
 // =============================================================================
@@ -95,32 +86,26 @@ export interface MassGetPropertyArgs {
   propertyName: string;
 }
 
-// =============================================================================
-// Object Creation/Deletion Tools
-// =============================================================================
-
-export interface CreateObjectArgs {
-  className: string;
-  parent: string;
-  name?: string;
+// NEW: Set multiple properties on multiple instances
+export interface MassSetPropertiesArgs {
+  paths: string[];
+  properties: Record<string, unknown>;
 }
 
-export interface CreateObjectWithPropertiesArgs {
+// =============================================================================
+// Object Creation/Deletion Tools (Consolidated)
+// =============================================================================
+
+// Consolidated: properties is optional
+export interface CreateObjectArgs {
   className: string;
   parent: string;
   name?: string;
   properties?: Record<string, unknown>;
 }
 
+// Consolidated: properties is optional per-object
 export interface MassCreateObjectsArgs {
-  objects: Array<{
-    className: string;
-    parent: string;
-    name?: string;
-  }>;
-}
-
-export interface MassCreateObjectsWithPropertiesArgs {
   objects: Array<{
     className: string;
     parent: string;
@@ -180,7 +165,7 @@ export interface SetRelativePropertyArgs {
 }
 
 // =============================================================================
-// Script Management Tools
+// Script Management Tools (Consolidated)
 // =============================================================================
 
 export interface GetScriptSourceArgs {
@@ -194,32 +179,38 @@ export interface SetScriptSourceArgs {
   source: string;
 }
 
-export interface EditScriptLinesArgs {
+// Consolidated: edit_script covers replace, insert, delete
+export interface EditScriptArgs {
   instancePath: string;
-  startLine: number;
-  endLine: number;
-  newContent: string;
+  operation: 'replace' | 'insert' | 'delete';
+  startLine?: number; // Required for replace, delete
+  endLine?: number;   // Required for replace, delete
+  afterLine?: number; // Required for insert (0 = beginning)
+  content?: string;   // Required for replace, insert
 }
 
-export interface InsertScriptLinesArgs {
-  instancePath: string;
-  afterLine?: number;
-  newContent: string;
+// NEW: Mass script operations
+export interface MassGetScriptSourceArgs {
+  paths: string[];
+  startLine?: number;
+  endLine?: number;
 }
 
-export interface DeleteScriptLinesArgs {
-  instancePath: string;
-  startLine: number;
-  endLine: number;
+export interface MassSetScriptSourceArgs {
+  scripts: Array<{
+    instancePath: string;
+    source: string;
+  }>;
 }
 
 // =============================================================================
-// Attribute Tools
+// Attribute Tools (Consolidated)
 // =============================================================================
 
-export interface GetAttributeArgs {
+// Consolidated: attributeName is optional (all attributes if omitted)
+export interface GetAttributesArgs {
   instancePath: string;
-  attributeName: string;
+  attributeName?: string;
 }
 
 export interface SetAttributeArgs {
@@ -229,13 +220,22 @@ export interface SetAttributeArgs {
   valueType?: 'Vector3' | 'Color3' | 'UDim2' | 'BrickColor';
 }
 
-export interface GetAttributesArgs {
-  instancePath: string;
-}
-
 export interface DeleteAttributeArgs {
   instancePath: string;
   attributeName: string;
+}
+
+// NEW: Mass attribute operations
+export interface MassGetAttributesArgs {
+  paths: string[];
+  attributeName?: string;
+}
+
+export interface MassSetAttributeArgs {
+  paths: string[];
+  attributeName: string;
+  attributeValue: unknown;
+  valueType?: 'Vector3' | 'Color3' | 'UDim2' | 'BrickColor';
 }
 
 // =============================================================================
@@ -257,6 +257,17 @@ export interface RemoveTagArgs {
 }
 
 export interface GetTaggedArgs {
+  tagName: string;
+}
+
+// NEW: Mass tag operations
+export interface MassAddTagArgs {
+  paths: string[];
+  tagName: string;
+}
+
+export interface MassRemoveTagArgs {
+  paths: string[];
   tagName: string;
 }
 
@@ -309,4 +320,29 @@ export interface AssetCatalog {
   version: string;
   lastUpdated: string;
   categories: Record<string, CatalogAsset[]>;
+}
+
+// =============================================================================
+// Batch Tool (NEW)
+// =============================================================================
+
+export interface BatchOperation {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+export interface BatchArgs {
+  operations: BatchOperation[];
+  continueOnError?: boolean;
+}
+
+export interface BatchResult {
+  results: Array<{
+    tool: string;
+    success: boolean;
+    result?: unknown;
+    error?: string;
+  }>;
+  successCount: number;
+  errorCount: number;
 }

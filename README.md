@@ -46,44 +46,62 @@ It's a bug I'll try to fix, but isn't at the front of my priorities due to the e
 
 The MCP server provides 40+ tools organized into categories:
 
+### 🚀 **Batch Operations (New in v2.1.0)**
+- `batch` - Execute multiple tool operations in a single call (reduces roundtrips, improves performance)
+
 ### 🏗️ **Instance Hierarchy & Navigation**
-- `get_file_tree` - Explore Roblox instance hierarchy
 - `get_project_structure` - Get complete game structure with customizable depth
-- `search_files` - Find instances by name, type, or script content
+- `search_instances` - Unified search by name, class, script content, or property values
 - `get_services` - Access Roblox services and their children
+- `get_instance_children` - Get children of any instance
 
 ### 🔧 **Property Management**
 - `get_instance_properties` - Read all properties of any instance
 - `set_property` - Modify instance properties
-- `mass_set_property` - Bulk property modifications
+- `mass_set_property` - Bulk property modifications (same property on multiple instances)
+- `mass_get_property` - Bulk property reads
+- `mass_set_properties` - Set multiple properties on multiple instances at once
 - `set_calculated_property` - Use mathematical formulas for property values
 - `set_relative_property` - Modify properties relative to current values
 
 ### 🏭 **Object Creation & Management**
-- `create_object` - Create new Roblox instances
-- `mass_create_objects` - Bulk object creation
+- `create_object` - Create new Roblox instances (optionally with initial properties)
+- `mass_create_objects` - Bulk object creation (each with optional properties)
 - `smart_duplicate` - Intelligent duplication with automatic naming/positioning
+- `mass_duplicate` - Multiple smart duplications at once
 - `delete_object` - Remove instances
 
 ### 📝 **Script Management**
 - `get_script_source` - Read script source code with line numbers
 - `set_script_source` - Replace entire script content
-- `edit_script_lines` - Modify specific lines in scripts
-- `insert_script_lines` - Add new lines at specific positions
-- `delete_script_lines` - Remove lines from scripts
+- `edit_script` - Edit scripts: replace, insert, or delete lines (consolidated)
+- `mass_get_script_source` - Read multiple scripts at once
+- `mass_set_script_source` - Write multiple scripts at once
 
-### 🏷️ **Attributes & Tags**
-- Full CollectionService tag management
-- Instance attribute operations (get/set/delete)
+### 🏷️ **Attributes**
+- `get_attributes` - Get single attribute or all attributes from an instance
+- `set_attribute` - Set an attribute on an instance
+- `delete_attribute` - Remove an attribute
+- `mass_get_attributes` - Bulk attribute reads
+- `mass_set_attribute` - Bulk attribute writes
+
+### 🔖 **Tags (CollectionService)**
+- `get_tags` - Get all tags on an instance
+- `add_tag` / `remove_tag` - Manage individual tags
+- `get_tagged` - Find all instances with a specific tag
+- `mass_add_tag` / `mass_remove_tag` - Bulk tag operations
 
 ### 🎨 **Asset Integration**
 - `insert_asset` - Add models/assets from Creator Store by ID
+- `insert_multiple_assets` - Insert multiple assets at once
 - `search_asset_catalog` - Search curated asset catalog (trees, buildings, effects, etc.)
 - `get_asset_info` - Get information about assets
+- `list_asset_categories` - List all available asset categories
 
 ### 📊 **Studio Context**
 - `get_place_info` - Current place details
 - `get_selection` - Currently selected objects
+- `get_class_info` - Get properties/methods for Roblox classes
 
 ### 💡 **Example Queries**
 
@@ -94,6 +112,17 @@ Ask things like:
 - *"Add trees around the map perimeter"*
 - *"Optimize this movement script"*
 - *"Search for all parts with CanCollide = false"*
+
+### 🔥 **v2.1.0 Batch Example**
+
+Execute multiple operations in one call:
+```
+batch([
+  { tool: "create_object", args: { className: "Part", parent: "game.Workspace", name: "Floor", properties: { Size: [100, 1, 100] } } },
+  { tool: "create_object", args: { className: "SpawnLocation", parent: "game.Workspace", name: "Spawn" } },
+  { tool: "mass_add_tag", args: { paths: ["game.Workspace.Floor", "game.Workspace.Spawn"], tagName: "GameObjects" } }
+])
+```
 
 ## Troubleshooting
 
@@ -133,13 +162,21 @@ npm run dev
 
 - `src/index.ts` - Main MCP server entry point
 - `src/tools/` - Tool implementations
-- `src/bridge-service.ts` - HTTP bridge to Studio plugin
+- `src/bridge-service.ts` - HTTP bridge to Studio plugin (with batch support)
 - `src/http-server.ts` - HTTP server for plugin communication
 - `studio-plugin/MCPPlugin.rbxmx` - Roblox Studio plugin file (place in Plugins folder)
 - `studio-plugin/` - Source for the Roblox Studio plugin (Luau)
 
 ---
 
-**v2.0.0** — 40+ tools, asset catalog integration, mass operations, smart duplication, calculated properties (Modified Fork)
+**v2.1.0** — Consolidated tools, batch execution, mass operations, smart duplication, calculated properties (Modified Fork)
+
+**Changes in v2.1.0:**
+- **Tool consolidation** - Reduced tool count while maintaining functionality (better LLM performance)
+- **Batch tool** - Execute multiple operations in a single call
+- **New mass tools** - `mass_set_properties`, `mass_get_script_source`, `mass_set_script_source`, `mass_get_attributes`, `mass_set_attribute`, `mass_add_tag`, `mass_remove_tag`
+- **Unified search** - `search_instances` replaces multiple search tools
+- **Consolidated script editing** - `edit_script` with operation type (replace/insert/delete)
+- **Transport batching** - Plugin polls for and responds to batched requests
 
 [Report Issues](https://github.com/DefinitelyNotJosh1/robloxstudio-mcp/issues) | [DevForum](https://devforum.roblox.com/t/v180-roblox-studio-mcp-speed-up-your-workflow-by-letting-ai-read-paths-and-properties/3707071) | MIT Licensed

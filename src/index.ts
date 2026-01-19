@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 
 /**
- * Roblox Studio MCP Server
+ * Roblox Studio MCP Server v2.1.0
  * 
  * This server provides Model Context Protocol (MCP) tools for interacting with Roblox Studio.
  * It allows AI assistants to access Studio data, scripts, and objects through a bridge plugin.
+ * 
+ * v2.1.0 Changes:
+ * - Consolidated redundant tools for better LLM performance
+ * - Added batch tool for executing multiple operations in one call
+ * - Added mass attribute, tag, and script tools
+ * - Improved batching at transport layer
  * 
  * Usage:
  *   npx robloxstudio-mcp
@@ -27,8 +33,6 @@ import {
 import { createHttpServer } from './http-server.js';
 import { RobloxStudioTools } from './tools/index.js';
 import { BridgeService } from './bridge-service.js';
-// Type definitions are in ./types/tool-args.ts for reference
-// Using 'any' casts for SDK compatibility while maintaining type documentation
 
 class RobloxStudioMCPServer {
   private server: Server;
@@ -39,7 +43,7 @@ class RobloxStudioMCPServer {
     this.server = new Server(
       {
         name: 'robloxstudio-mcp',
-        version: '2.0.0',
+        version: '2.1.0',
       },
       {
         capabilities: {
@@ -57,42 +61,108 @@ class RobloxStudioMCPServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: [
-          // Instance Hierarchy Tools (NOT local filesystem - these operate on Roblox Studio instances)
+          // =====================================================================
+          // BATCH TOOL - Execute multiple operations in one call
+          // =====================================================================
           {
-            name: 'get_file_tree',
-            description: 'Get the Roblox instance hierarchy tree from Roblox Studio. Returns game instances (Parts, Scripts, Models, Folders, etc.) as a tree structure. NOTE: This operates on Roblox Studio instances, NOT local filesystem files.',
+            name: 'batch',
+            description: 'Execute multiple tool operations in a single call. Reduces roundtrips and improves performance for multi-step workflows.',
             inputSchema: {
               type: 'object',
               properties: {
-                path: {
-                  type: 'string',
-                  description: 'Roblox instance path to start from using dot notation (e.g., "game.Workspace", "game.ServerScriptService"). Defaults to game root if empty.',
-                  default: ''
+                operations: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      tool: { type: 'string', description: 'Name of the tool to execute' },
+                      args: { type: 'object', description: 'Arguments for the tool' }
+                    },
+                    required: ['tool', 'args']
+                  },
+                  description: 'Array of operations to execute sequentially'
+                },
+                continueOnError: {
+                  type: 'boolean',
+                  description: 'If true, continue executing operations even if one fails (default: false)',
+                  default: false
                 }
-              }
+              },
+              required: ['operations']
             }
           },
+
+          // =====================================================================
+          // SEARCH (Consolidated)
+          // =====================================================================
           {
-            name: 'search_files',
-            description: 'Search for Roblox instances by name, class type, or script content. NOTE: This searches Roblox Studio instances, NOT local filesystem files.',
+            name: 'search_instances',
+            description: 'Search for Roblox instances by name, class type, script content, or property value. Unified search tool.',
             inputSchema: {
               type: 'object',
               properties: {
                 query: {
                   type: 'string',
-                  description: 'Search query - instance name, class type (e.g., "Script", "Part"), or Lua code pattern'
+                  description: 'Search query - instance name, class type, script content, or property value'
                 },
                 searchType: {
                   type: 'string',
-                  enum: ['name', 'type', 'content'],
-                  description: 'Type of search: "name" for instance names, "type" for class names, "content" for script source code',
+                  enum: ['name', 'class', 'content', 'property'],
+                  description: 'Type of search to perform',
                   default: 'name'
+                },
+                scope: {
+                  type: 'string',
+                  description: 'Instance path to search within (e.g., "game.Workspace"). Defaults to entire game.'
+                },
+                propertyName: {
+                  type: 'string',
+                  description: 'Property name (required when searchType is "property")'
+                },
+                propertyValue: {
+                  description: 'Property value to match (used when searchType is "property")'
+                },
+                maxResults: {
+                  type: 'number',
+                  description: 'Maximum number of results to return',
+                  default: 100
                 }
               },
               required: ['query']
             }
           },
-          // Studio Context Tools
+
+          // =====================================================================
+          // HIERARCHY (Consolidated - removed get_file_tree)
+          // =====================================================================
+          {
+            name: 'get_project_structure',
+            description: 'Get the Roblox instance hierarchy tree. Use maxDepth to control depth (default: 3, use 5-10 for thorough exploration).',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                path: {
+                  type: 'string',
+                  description: 'Instance path to start from (e.g., "game.Workspace"). Defaults to game root.',
+                  default: ''
+                },
+                maxDepth: {
+                  type: 'number',
+                  description: 'Maximum depth to traverse (default: 3). Use 5-10 for comprehensive exploration.',
+                  default: 3
+                },
+                scriptsOnly: {
+                  type: 'boolean',
+                  description: 'Show only scripts and script containers',
+                  default: false
+                }
+              }
+            }
+          },
+
+          // =====================================================================
+          // STUDIO CONTEXT
+          // =====================================================================
           {
             name: 'get_place_info',
             description: 'Get place ID, name, and game settings',
@@ -114,40 +184,19 @@ class RobloxStudioMCPServer {
               }
             }
           },
-          {
-            name: 'search_objects',
-            description: 'Find instances by name, class, or properties',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                query: {
-                  type: 'string',
-                  description: 'Search query'
-                },
-                searchType: {
-                  type: 'string',
-                  enum: ['name', 'class', 'property'],
-                  description: 'Type of search to perform',
-                  default: 'name'
-                },
-                propertyName: {
-                  type: 'string',
-                  description: 'Property name when searchType is "property"'
-                }
-              },
-              required: ['query']
-            }
-          },
-          // Property & Instance Tools
+
+          // =====================================================================
+          // INSTANCE PROPERTIES
+          // =====================================================================
           {
             name: 'get_instance_properties',
-            description: 'Get all properties of a specific Roblox instance in Studio',
+            description: 'Get all properties of a specific Roblox instance',
             inputSchema: {
               type: 'object',
               properties: {
                 instancePath: {
                   type: 'string',
-                  description: 'Roblox instance path using dot notation (e.g., "game.Workspace.Part", "game.ServerScriptService.MainScript", "game.ReplicatedStorage.ModuleScript")'
+                  description: 'Instance path using dot notation (e.g., "game.Workspace.Part")'
                 }
               },
               required: ['instancePath']
@@ -155,190 +204,107 @@ class RobloxStudioMCPServer {
           },
           {
             name: 'get_instance_children',
-            description: 'Get child instances and their class types from a Roblox parent instance',
+            description: 'Get child instances and their class types',
             inputSchema: {
               type: 'object',
               properties: {
                 instancePath: {
                   type: 'string',
-                  description: 'Roblox instance path using dot notation (e.g., "game.Workspace", "game.ServerScriptService")'
+                  description: 'Instance path using dot notation (e.g., "game.Workspace")'
                 }
               },
               required: ['instancePath']
             }
           },
           {
-            name: 'search_by_property',
-            description: 'Find objects with specific property values',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                propertyName: {
-                  type: 'string',
-                  description: 'Name of the property to search'
-                },
-                propertyValue: {
-                  type: 'string',
-                  description: 'Value to search for'
-                }
-              },
-              required: ['propertyName', 'propertyValue']
-            }
-          },
-          {
             name: 'get_class_info',
-            description: 'Get available properties/methods for Roblox classes',
+            description: 'Get available properties/methods for a Roblox class',
             inputSchema: {
               type: 'object',
               properties: {
                 className: {
                   type: 'string',
-                  description: 'Roblox class name'
+                  description: 'Roblox class name (e.g., "Part", "Script")'
                 }
               },
               required: ['className']
             }
           },
-          // Project Tools
-          {
-            name: 'get_project_structure',
-            description: 'Get complete game hierarchy. IMPORTANT: Use maxDepth parameter (default: 3) to explore deeper levels of the hierarchy. Set higher values like 5-10 for comprehensive exploration',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                path: {
-                  type: 'string',
-                  description: 'Optional path to start from (defaults to workspace root)',
-                  default: ''
-                },
-                maxDepth: {
-                  type: 'number',
-                  description: 'Maximum depth to traverse (default: 3). RECOMMENDED: Use 5-10 for thorough exploration. Higher values provide more complete structure',
-                  default: 3
-                },
-                scriptsOnly: {
-                  type: 'boolean',
-                  description: 'Show only scripts and script containers',
-                  default: false
-                }
-              }
-            }
-          },
-          // Property Modification Tools
+
+          // =====================================================================
+          // PROPERTY MODIFICATION
+          // =====================================================================
           {
             name: 'set_property',
-            description: 'Set a property on any Roblox instance',
+            description: 'Set a property on a Roblox instance',
             inputSchema: {
               type: 'object',
               properties: {
-                instancePath: {
-                  type: 'string',
-                  description: 'Path to the instance (e.g., "game.Workspace.Part")'
-                },
-                propertyName: {
-                  type: 'string',
-                  description: 'Name of the property to set'
-                },
-                propertyValue: {
-                  description: 'Value to set the property to (any type)'
-                }
+                instancePath: { type: 'string', description: 'Path to the instance' },
+                propertyName: { type: 'string', description: 'Property name to set' },
+                propertyValue: { description: 'Value to set' }
               },
               required: ['instancePath', 'propertyName', 'propertyValue']
             }
           },
           {
             name: 'mass_set_property',
-            description: 'Set the same property on multiple instances at once',
+            description: 'Set the same property on multiple instances',
             inputSchema: {
               type: 'object',
               properties: {
-                paths: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Array of instance paths to modify'
-                },
-                propertyName: {
-                  type: 'string',
-                  description: 'Name of the property to set'
-                },
-                propertyValue: {
-                  description: 'Value to set the property to (any type)'
-                }
+                paths: { type: 'array', items: { type: 'string' }, description: 'Array of instance paths' },
+                propertyName: { type: 'string', description: 'Property name to set' },
+                propertyValue: { description: 'Value to set' }
               },
               required: ['paths', 'propertyName', 'propertyValue']
             }
           },
           {
             name: 'mass_get_property',
-            description: 'Get the same property from multiple instances at once',
+            description: 'Get the same property from multiple instances',
             inputSchema: {
               type: 'object',
               properties: {
-                paths: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Array of instance paths to read from'
-                },
-                propertyName: {
-                  type: 'string',
-                  description: 'Name of the property to get'
-                }
+                paths: { type: 'array', items: { type: 'string' }, description: 'Array of instance paths' },
+                propertyName: { type: 'string', description: 'Property name to get' }
               },
               required: ['paths', 'propertyName']
             }
           },
-          // Object Creation/Deletion Tools
           {
-            name: 'create_object',
-            description: 'Create a new Roblox object instance (basic, without properties)',
+            name: 'mass_set_properties',
+            description: 'Set multiple properties on multiple instances at once',
             inputSchema: {
               type: 'object',
               properties: {
-                className: {
-                  type: 'string',
-                  description: 'Roblox class name (e.g., "Part", "Script", "Folder")'
-                },
-                parent: {
-                  type: 'string',
-                  description: 'Path to the parent instance (e.g., "game.Workspace")'
-                },
-                name: {
-                  type: 'string',
-                  description: 'Optional name for the new object'
-                }
+                paths: { type: 'array', items: { type: 'string' }, description: 'Array of instance paths' },
+                properties: { type: 'object', description: 'Object of property names to values' }
               },
-              required: ['className', 'parent']
+              required: ['paths', 'properties']
             }
           },
+
+          // =====================================================================
+          // OBJECT CREATION/DELETION (Consolidated)
+          // =====================================================================
           {
-            name: 'create_object_with_properties',
-            description: 'Create a new Roblox object instance with initial properties',
+            name: 'create_object',
+            description: 'Create a new Roblox object, optionally with initial properties',
             inputSchema: {
               type: 'object',
               properties: {
-                className: {
-                  type: 'string',
-                  description: 'Roblox class name (e.g., "Part", "Script", "Folder")'
-                },
-                parent: {
-                  type: 'string',
-                  description: 'Path to the parent instance (e.g., "game.Workspace")'
-                },
-                name: {
-                  type: 'string',
-                  description: 'Optional name for the new object'
-                },
-                properties: {
-                  type: 'object',
-                  description: 'Properties to set on creation'
-                }
+                className: { type: 'string', description: 'Roblox class name (e.g., "Part", "Script")' },
+                parent: { type: 'string', description: 'Parent instance path (e.g., "game.Workspace")' },
+                name: { type: 'string', description: 'Optional name for the new object' },
+                properties: { type: 'object', description: 'Optional properties to set on creation' }
               },
               required: ['className', 'parent']
             }
           },
           {
             name: 'mass_create_objects',
-            description: 'Create multiple objects at once (basic, without properties)',
+            description: 'Create multiple objects at once, each optionally with properties',
             inputSchema: {
               type: 'object',
               properties: {
@@ -348,36 +314,13 @@ class RobloxStudioMCPServer {
                     type: 'object',
                     properties: {
                       className: { type: 'string', description: 'Roblox class name' },
-                      parent: { type: 'string', description: 'Path to the parent instance' },
-                      name: { type: 'string', description: 'Optional name for the object' }
+                      parent: { type: 'string', description: 'Parent instance path' },
+                      name: { type: 'string', description: 'Optional name' },
+                      properties: { type: 'object', description: 'Optional properties' }
                     },
                     required: ['className', 'parent']
                   },
                   description: 'Array of objects to create'
-                }
-              },
-              required: ['objects']
-            }
-          },
-          {
-            name: 'mass_create_objects_with_properties',
-            description: 'Create multiple objects at once with initial properties',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                objects: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      className: { type: 'string', description: 'Roblox class name' },
-                      parent: { type: 'string', description: 'Path to the parent instance' },
-                      name: { type: 'string', description: 'Optional name for the object' },
-                      properties: { type: 'object', description: 'Properties to set on creation' }
-                    },
-                    required: ['className', 'parent']
-                  },
-                  description: 'Array of objects to create with properties'
                 }
               },
               required: ['objects']
@@ -394,24 +337,27 @@ class RobloxStudioMCPServer {
               required: ['instancePath']
             }
           },
-          // Smart Duplication Tools
+
+          // =====================================================================
+          // SMART DUPLICATION
+          // =====================================================================
           {
             name: 'smart_duplicate',
-            description: 'Smart duplication with automatic naming, positioning, and property variations',
+            description: 'Smart duplication with naming, positioning, and property variations',
             inputSchema: {
               type: 'object',
               properties: {
-                instancePath: { type: 'string', description: 'Path to the instance to duplicate' },
+                instancePath: { type: 'string', description: 'Path to instance to duplicate' },
                 count: { type: 'number', description: 'Number of duplicates to create' },
                 options: {
                   type: 'object',
                   properties: {
-                    namePattern: { type: 'string', description: 'Name pattern with {n} placeholder (e.g., "Button{n}")' },
-                    positionOffset: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3, description: 'X, Y, Z offset per duplicate' },
-                    rotationOffset: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3, description: 'X, Y, Z rotation offset per duplicate' },
-                    scaleOffset: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3, description: 'X, Y, Z scale multiplier per duplicate' },
-                    propertyVariations: { type: 'object', description: 'Property name to array of values' },
-                    targetParents: { type: 'array', items: { type: 'string' }, description: 'Different parent for each duplicate' }
+                    namePattern: { type: 'string', description: 'Name pattern with {n} placeholder' },
+                    positionOffset: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 },
+                    rotationOffset: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 },
+                    scaleOffset: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 },
+                    propertyVariations: { type: 'object' },
+                    targetParents: { type: 'array', items: { type: 'string' } }
                   }
                 }
               },
@@ -429,197 +375,236 @@ class RobloxStudioMCPServer {
                   items: {
                     type: 'object',
                     properties: {
-                      instancePath: { type: 'string', description: 'Path to the instance to duplicate' },
-                      count: { type: 'number', description: 'Number of duplicates to create' },
+                      instancePath: { type: 'string' },
+                      count: { type: 'number' },
                       options: { type: 'object' }
                     },
                     required: ['instancePath', 'count']
-                  },
-                  description: 'Array of duplication operations'
+                  }
                 }
               },
               required: ['duplications']
             }
           },
-          // Calculated Property Tools
+
+          // =====================================================================
+          // CALCULATED/RELATIVE PROPERTIES
+          // =====================================================================
           {
             name: 'set_calculated_property',
-            description: 'Set properties using mathematical formulas and variables',
+            description: 'Set properties using mathematical formulas',
             inputSchema: {
               type: 'object',
               properties: {
-                paths: { type: 'array', items: { type: 'string' }, description: 'Array of instance paths to modify' },
-                propertyName: { type: 'string', description: 'Name of the property to set' },
-                formula: { type: 'string', description: 'Mathematical formula (e.g., "Position.magnitude * 2", "index * 50")' },
-                variables: { type: 'object', description: 'Additional variables for the formula' }
+                paths: { type: 'array', items: { type: 'string' }, description: 'Instance paths to modify' },
+                propertyName: { type: 'string', description: 'Property to set' },
+                formula: { type: 'string', description: 'Formula (e.g., "index * 50")' },
+                variables: { type: 'object', description: 'Additional variables for formula' }
               },
               required: ['paths', 'propertyName', 'formula']
             }
           },
-          // Relative Property Tools
           {
             name: 'set_relative_property',
-            description: 'Modify properties relative to their current values',
+            description: 'Modify properties relative to current values',
             inputSchema: {
               type: 'object',
               properties: {
-                paths: { type: 'array', items: { type: 'string' }, description: 'Array of instance paths to modify' },
-                propertyName: { type: 'string', description: 'Name of the property to modify' },
-                operation: { type: 'string', enum: ['add', 'multiply', 'divide', 'subtract', 'power'], description: 'Mathematical operation to perform' },
-                value: { description: 'Value to use in the operation' },
-                component: { type: 'string', enum: ['X', 'Y', 'Z'], description: 'Specific component for Vector3/UDim2 properties' }
+                paths: { type: 'array', items: { type: 'string' } },
+                propertyName: { type: 'string' },
+                operation: { type: 'string', enum: ['add', 'multiply', 'divide', 'subtract', 'power'] },
+                value: {},
+                component: { type: 'string', enum: ['X', 'Y', 'Z'] }
               },
               required: ['paths', 'propertyName', 'operation', 'value']
             }
           },
-          // Script Management Tools
+
+          // =====================================================================
+          // SCRIPT MANAGEMENT (Consolidated + Mass)
+          // =====================================================================
           {
             name: 'get_script_source',
-            description: 'Get the source code of a Roblox script (LocalScript, Script, or ModuleScript). Returns both "source" (raw code) and "numberedSource" (with line numbers prefixed like "1: code"). Use numberedSource to accurately identify line numbers for editing. For large scripts (>1500 lines), use startLine/endLine to read specific sections.',
+            description: 'Get source code of a Roblox script. Returns "source" and "numberedSource" (with line numbers).',
             inputSchema: {
               type: 'object',
               properties: {
-                instancePath: { type: 'string', description: 'Roblox instance path to the script using dot notation' },
-                startLine: { type: 'number', description: 'Optional: Start line number (1-indexed). Use for reading specific sections of large scripts.' },
-                endLine: { type: 'number', description: 'Optional: End line number (inclusive). Use for reading specific sections of large scripts.' }
+                instancePath: { type: 'string', description: 'Path to the script' },
+                startLine: { type: 'number', description: 'Optional start line (1-indexed)' },
+                endLine: { type: 'number', description: 'Optional end line (inclusive)' }
               },
               required: ['instancePath']
             }
           },
           {
             name: 'set_script_source',
-            description: 'Replace the entire source code of a Roblox script. Uses ScriptEditorService:UpdateSourceAsync (works with open editors). For partial edits, prefer edit_script_lines, insert_script_lines, or delete_script_lines.',
+            description: 'Replace entire source code of a script',
             inputSchema: {
               type: 'object',
               properties: {
-                instancePath: { type: 'string', description: 'Roblox instance path to the script' },
-                source: { type: 'string', description: 'New source code for the script' }
+                instancePath: { type: 'string', description: 'Path to the script' },
+                source: { type: 'string', description: 'New source code' }
               },
               required: ['instancePath', 'source']
             }
           },
           {
-            name: 'edit_script_lines',
-            description: 'Replace specific lines in a Roblox script without rewriting the entire source. IMPORTANT: Use the "numberedSource" field from get_script_source to identify the correct line numbers.',
+            name: 'edit_script',
+            description: 'Edit a script: replace lines, insert lines, or delete lines',
             inputSchema: {
               type: 'object',
               properties: {
-                instancePath: { type: 'string', description: 'Roblox instance path to the script' },
-                startLine: { type: 'number', description: 'First line to replace (1-indexed)' },
-                endLine: { type: 'number', description: 'Last line to replace (inclusive)' },
-                newContent: { type: 'string', description: 'New content to replace the specified lines' }
+                instancePath: { type: 'string', description: 'Path to the script' },
+                operation: { 
+                  type: 'string', 
+                  enum: ['replace', 'insert', 'delete'],
+                  description: 'Operation type'
+                },
+                startLine: { type: 'number', description: 'Start line for replace/delete (1-indexed)' },
+                endLine: { type: 'number', description: 'End line for replace/delete (inclusive)' },
+                afterLine: { type: 'number', description: 'Insert after this line (0 = beginning)', default: 0 },
+                content: { type: 'string', description: 'Content for replace/insert operations' }
               },
-              required: ['instancePath', 'startLine', 'endLine', 'newContent']
+              required: ['instancePath', 'operation']
             }
           },
           {
-            name: 'insert_script_lines',
-            description: 'Insert new lines into a Roblox script at a specific position.',
+            name: 'mass_get_script_source',
+            description: 'Get source code from multiple scripts at once',
             inputSchema: {
               type: 'object',
               properties: {
-                instancePath: { type: 'string', description: 'Roblox instance path to the script' },
-                afterLine: { type: 'number', description: 'Insert after this line number (0 = insert at very beginning)', default: 0 },
-                newContent: { type: 'string', description: 'Content to insert (can be multiple lines)' }
+                paths: { type: 'array', items: { type: 'string' }, description: 'Array of script paths' },
+                startLine: { type: 'number', description: 'Optional start line for all scripts' },
+                endLine: { type: 'number', description: 'Optional end line for all scripts' }
               },
-              required: ['instancePath', 'newContent']
+              required: ['paths']
             }
           },
           {
-            name: 'delete_script_lines',
-            description: 'Delete specific lines from a Roblox script.',
+            name: 'mass_set_script_source',
+            description: 'Set source code for multiple scripts at once',
             inputSchema: {
               type: 'object',
               properties: {
-                instancePath: { type: 'string', description: 'Roblox instance path to the script' },
-                startLine: { type: 'number', description: 'First line to delete (1-indexed)' },
-                endLine: { type: 'number', description: 'Last line to delete (inclusive)' }
+                scripts: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      instancePath: { type: 'string', description: 'Path to the script' },
+                      source: { type: 'string', description: 'New source code' }
+                    },
+                    required: ['instancePath', 'source']
+                  }
+                }
               },
-              required: ['instancePath', 'startLine', 'endLine']
+              required: ['scripts']
             }
           },
-          // Attribute Tools
-          {
-            name: 'get_attribute',
-            description: 'Get a single attribute value from a Roblox instance',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                instancePath: { type: 'string', description: 'Roblox instance path using dot notation' },
-                attributeName: { type: 'string', description: 'Name of the attribute to get' }
-              },
-              required: ['instancePath', 'attributeName']
-            }
-          },
-          {
-            name: 'set_attribute',
-            description: 'Set an attribute value on a Roblox instance. Supports string, number, boolean, Vector3, Color3, UDim2, and BrickColor.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                instancePath: { type: 'string', description: 'Roblox instance path using dot notation' },
-                attributeName: { type: 'string', description: 'Name of the attribute to set' },
-                attributeValue: { description: 'Value to set. For Vector3: {X, Y, Z}, Color3: {R, G, B}, UDim2: {X: {Scale, Offset}, Y: {Scale, Offset}}' },
-                valueType: { type: 'string', description: 'Optional type hint: "Vector3", "Color3", "UDim2", "BrickColor"' }
-              },
-              required: ['instancePath', 'attributeName', 'attributeValue']
-            }
-          },
+
+          // =====================================================================
+          // ATTRIBUTES (Consolidated + Mass)
+          // =====================================================================
           {
             name: 'get_attributes',
-            description: 'Get all attributes on a Roblox instance',
+            description: 'Get attributes from an instance. If attributeName provided, get single attribute; otherwise get all.',
             inputSchema: {
               type: 'object',
               properties: {
-                instancePath: { type: 'string', description: 'Roblox instance path using dot notation' }
+                instancePath: { type: 'string', description: 'Instance path' },
+                attributeName: { type: 'string', description: 'Optional: specific attribute name (omit for all)' }
               },
               required: ['instancePath']
             }
           },
           {
-            name: 'delete_attribute',
-            description: 'Delete an attribute from a Roblox instance',
+            name: 'set_attribute',
+            description: 'Set an attribute on an instance',
             inputSchema: {
               type: 'object',
               properties: {
-                instancePath: { type: 'string', description: 'Roblox instance path using dot notation' },
-                attributeName: { type: 'string', description: 'Name of the attribute to delete' }
+                instancePath: { type: 'string' },
+                attributeName: { type: 'string' },
+                attributeValue: { description: 'Value to set' },
+                valueType: { type: 'string', description: 'Type hint: "Vector3", "Color3", "UDim2", "BrickColor"' }
+              },
+              required: ['instancePath', 'attributeName', 'attributeValue']
+            }
+          },
+          {
+            name: 'delete_attribute',
+            description: 'Delete an attribute from an instance',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                instancePath: { type: 'string' },
+                attributeName: { type: 'string' }
               },
               required: ['instancePath', 'attributeName']
             }
           },
-          // Tag Tools (CollectionService)
           {
-            name: 'get_tags',
-            description: 'Get all CollectionService tags on a Roblox instance',
+            name: 'mass_get_attributes',
+            description: 'Get attributes from multiple instances at once',
             inputSchema: {
               type: 'object',
               properties: {
-                instancePath: { type: 'string', description: 'Roblox instance path using dot notation' }
+                paths: { type: 'array', items: { type: 'string' }, description: 'Array of instance paths' },
+                attributeName: { type: 'string', description: 'Optional: specific attribute (omit for all)' }
+              },
+              required: ['paths']
+            }
+          },
+          {
+            name: 'mass_set_attribute',
+            description: 'Set the same attribute on multiple instances',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                paths: { type: 'array', items: { type: 'string' } },
+                attributeName: { type: 'string' },
+                attributeValue: {},
+                valueType: { type: 'string' }
+              },
+              required: ['paths', 'attributeName', 'attributeValue']
+            }
+          },
+
+          // =====================================================================
+          // TAGS (CollectionService) + Mass
+          // =====================================================================
+          {
+            name: 'get_tags',
+            description: 'Get all CollectionService tags on an instance',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                instancePath: { type: 'string' }
               },
               required: ['instancePath']
             }
           },
           {
             name: 'add_tag',
-            description: 'Add a CollectionService tag to a Roblox instance',
+            description: 'Add a tag to an instance',
             inputSchema: {
               type: 'object',
               properties: {
-                instancePath: { type: 'string', description: 'Roblox instance path using dot notation' },
-                tagName: { type: 'string', description: 'Name of the tag to add' }
+                instancePath: { type: 'string' },
+                tagName: { type: 'string' }
               },
               required: ['instancePath', 'tagName']
             }
           },
           {
             name: 'remove_tag',
-            description: 'Remove a CollectionService tag from a Roblox instance',
+            description: 'Remove a tag from an instance',
             inputSchema: {
               type: 'object',
               properties: {
-                instancePath: { type: 'string', description: 'Roblox instance path using dot notation' },
-                tagName: { type: 'string', description: 'Name of the tag to remove' }
+                instancePath: { type: 'string' },
+                tagName: { type: 'string' }
               },
               required: ['instancePath', 'tagName']
             }
@@ -630,37 +615,68 @@ class RobloxStudioMCPServer {
             inputSchema: {
               type: 'object',
               properties: {
-                tagName: { type: 'string', description: 'Name of the tag to search for' }
+                tagName: { type: 'string' }
               },
               required: ['tagName']
             }
           },
           {
+            name: 'mass_add_tag',
+            description: 'Add a tag to multiple instances at once',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                paths: { type: 'array', items: { type: 'string' } },
+                tagName: { type: 'string' }
+              },
+              required: ['paths', 'tagName']
+            }
+          },
+          {
+            name: 'mass_remove_tag',
+            description: 'Remove a tag from multiple instances at once',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                paths: { type: 'array', items: { type: 'string' } },
+                tagName: { type: 'string' }
+              },
+              required: ['paths', 'tagName']
+            }
+          },
+
+          // =====================================================================
+          // SELECTION
+          // =====================================================================
+          {
             name: 'get_selection',
-            description: 'Get all currently selected objects',
+            description: 'Get currently selected objects in Studio',
             inputSchema: {
               type: 'object',
               properties: {}
             }
           },
-          // Creator Store / Asset Tools
+
+          // =====================================================================
+          // CREATOR STORE / ASSETS
+          // =====================================================================
           {
             name: 'insert_asset',
-            description: 'Insert a model/asset from the Roblox Creator Store by its Asset ID. The asset will be loaded using InsertService:LoadAsset and placed in the specified parent.',
+            description: 'Insert an asset from the Roblox Creator Store by Asset ID',
             inputSchema: {
               type: 'object',
               properties: {
-                assetId: { type: 'number', description: 'Roblox Asset ID to insert (from Creator Store or Toolbox)' },
-                parent: { type: 'string', description: 'Path to the parent instance (e.g., "game.Workspace")' },
-                position: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3, description: 'Optional [X, Y, Z] position for the asset' },
-                name: { type: 'string', description: 'Optional name to give the inserted asset' }
+                assetId: { type: 'number', description: 'Roblox Asset ID' },
+                parent: { type: 'string', description: 'Parent instance path' },
+                position: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 },
+                name: { type: 'string' }
               },
               required: ['assetId', 'parent']
             }
           },
           {
             name: 'insert_multiple_assets',
-            description: 'Insert multiple assets from the Roblox Creator Store at once',
+            description: 'Insert multiple assets at once',
             inputSchema: {
               type: 'object',
               properties: {
@@ -669,14 +685,13 @@ class RobloxStudioMCPServer {
                   items: {
                     type: 'object',
                     properties: {
-                      assetId: { type: 'number', description: 'Roblox Asset ID' },
-                      parent: { type: 'string', description: 'Path to the parent instance' },
-                      position: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3, description: 'Optional position' },
-                      name: { type: 'string', description: 'Optional name' }
+                      assetId: { type: 'number' },
+                      parent: { type: 'string' },
+                      position: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 },
+                      name: { type: 'string' }
                     },
                     required: ['assetId', 'parent']
-                  },
-                  description: 'Array of assets to insert'
+                  }
                 }
               },
               required: ['assets']
@@ -684,31 +699,31 @@ class RobloxStudioMCPServer {
           },
           {
             name: 'get_asset_info',
-            description: 'Get information about a Roblox asset (works for assets you own or have access to)',
+            description: 'Get information about a Roblox asset',
             inputSchema: {
               type: 'object',
               properties: {
-                assetId: { type: 'number', description: 'Roblox Asset ID to get information about' }
+                assetId: { type: 'number' }
               },
               required: ['assetId']
             }
           },
           {
             name: 'search_asset_catalog',
-            description: 'Search the local curated asset catalog for models, effects, and other assets. This searches a pre-built catalog of popular assets - use insert_asset with the returned ID to add assets to your game. Note: This does NOT search the live Creator Store (no public API available yet).',
+            description: 'Search the local curated asset catalog',
             inputSchema: {
               type: 'object',
               properties: {
-                query: { type: 'string', description: 'Search query (matches name, description, tags)' },
-                category: { type: 'string', description: 'Optional category filter (trees, rocks, buildings, furniture, vehicles, weapons, characters, effects, terrain, ui)' },
-                maxResults: { type: 'number', description: 'Maximum number of results to return (default: 10)', default: 10 }
+                query: { type: 'string' },
+                category: { type: 'string' },
+                maxResults: { type: 'number', default: 10 }
               },
               required: ['query']
             }
           },
           {
             name: 'list_asset_categories',
-            description: 'List all available categories in the asset catalog with their asset counts',
+            description: 'List all asset catalog categories',
             inputSchema: {
               type: 'object',
               properties: {}
@@ -720,123 +735,219 @@ class RobloxStudioMCPServer {
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
-      // Type definitions for args are documented in ./types/tool-args.ts
-      // Using any casts for SDK compatibility
-      const a = args as any;
+      const a = args as Record<string, unknown>;
 
       try {
         switch (name) {
-          // File System Tools
-          case 'get_file_tree':
-            return await this.tools.getFileTree(a?.path || '');
-          case 'search_files':
-            return await this.tools.searchFiles(a?.query, a?.searchType || 'name');
-          
-          // Studio Context Tools
+          // Batch
+          case 'batch':
+            return await this.tools.batch(
+              a?.operations as Array<{tool: string; args: Record<string, unknown>}>,
+              a?.continueOnError as boolean
+            );
+
+          // Search (consolidated)
+          case 'search_instances':
+            return await this.tools.searchInstances(
+              a?.query as string,
+              a?.searchType as string,
+              a?.scope as string,
+              a?.propertyName as string,
+              a?.propertyValue,
+              a?.maxResults as number
+            );
+
+          // Hierarchy
+          case 'get_project_structure':
+            return await this.tools.getProjectStructure(
+              a?.path as string,
+              a?.maxDepth as number,
+              a?.scriptsOnly as boolean
+            );
+
+          // Studio Context
           case 'get_place_info':
             return await this.tools.getPlaceInfo();
           case 'get_services':
-            return await this.tools.getServices(a?.serviceName);
-          case 'search_objects':
-            return await this.tools.searchObjects(a?.query, a?.searchType || 'name', a?.propertyName);
-          
-          // Property & Instance Tools
+            return await this.tools.getServices(a?.serviceName as string);
+
+          // Instance Properties
           case 'get_instance_properties':
-            return await this.tools.getInstanceProperties(a?.instancePath);
+            return await this.tools.getInstanceProperties(a?.instancePath as string);
           case 'get_instance_children':
-            return await this.tools.getInstanceChildren(a?.instancePath);
-          case 'search_by_property':
-            return await this.tools.searchByProperty(a?.propertyName, a?.propertyValue);
+            return await this.tools.getInstanceChildren(a?.instancePath as string);
           case 'get_class_info':
-            return await this.tools.getClassInfo(a?.className);
-          
-          // Project Tools
-          case 'get_project_structure':
-            return await this.tools.getProjectStructure(a?.path, a?.maxDepth, a?.scriptsOnly);
-          
-          // Property Modification Tools
+            return await this.tools.getClassInfo(a?.className as string);
+
+          // Property Modification
           case 'set_property':
-            return await this.tools.setProperty(a?.instancePath, a?.propertyName, a?.propertyValue);
-          
-          // Mass Property Tools
+            return await this.tools.setProperty(
+              a?.instancePath as string,
+              a?.propertyName as string,
+              a?.propertyValue
+            );
           case 'mass_set_property':
-            return await this.tools.massSetProperty(a?.paths, a?.propertyName, a?.propertyValue);
+            return await this.tools.massSetProperty(
+              a?.paths as string[],
+              a?.propertyName as string,
+              a?.propertyValue
+            );
           case 'mass_get_property':
-            return await this.tools.massGetProperty(a?.paths, a?.propertyName);
-          
-          // Object Creation/Deletion Tools
+            return await this.tools.massGetProperty(
+              a?.paths as string[],
+              a?.propertyName as string
+            );
+          case 'mass_set_properties':
+            return await this.tools.massSetProperties(
+              a?.paths as string[],
+              a?.properties as Record<string, unknown>
+            );
+
+          // Object Creation/Deletion (consolidated)
           case 'create_object':
-            return await this.tools.createObject(a?.className, a?.parent, a?.name);
-          case 'create_object_with_properties':
-            return await this.tools.createObjectWithProperties(a?.className, a?.parent, a?.name, a?.properties);
+            return await this.tools.createObject(
+              a?.className as string,
+              a?.parent as string,
+              a?.name as string,
+              a?.properties as Record<string, unknown>
+            );
           case 'mass_create_objects':
-            return await this.tools.massCreateObjects(a?.objects);
-          case 'mass_create_objects_with_properties':
-            return await this.tools.massCreateObjectsWithProperties(a?.objects);
+            return await this.tools.massCreateObjects(
+              a?.objects as Array<{className: string; parent: string; name?: string; properties?: Record<string, unknown>}>
+            );
           case 'delete_object':
-            return await this.tools.deleteObject(a?.instancePath);
-          
-          // Smart Duplication Tools
+            return await this.tools.deleteObject(a?.instancePath as string);
+
+          // Smart Duplication
           case 'smart_duplicate':
-            return await this.tools.smartDuplicate(a?.instancePath, a?.count, a?.options);
+            return await this.tools.smartDuplicate(
+              a?.instancePath as string,
+              a?.count as number,
+              a?.options as Parameters<typeof this.tools.smartDuplicate>[2]
+            );
           case 'mass_duplicate':
-            return await this.tools.massDuplicate(a?.duplications);
-          
-          // Calculated Property Tools
+            return await this.tools.massDuplicate(
+              a?.duplications as Parameters<typeof this.tools.massDuplicate>[0]
+            );
+
+          // Calculated/Relative Properties
           case 'set_calculated_property':
-            return await this.tools.setCalculatedProperty(a?.paths, a?.propertyName, a?.formula, a?.variables);
-          
-          // Relative Property Tools
+            return await this.tools.setCalculatedProperty(
+              a?.paths as string[],
+              a?.propertyName as string,
+              a?.formula as string,
+              a?.variables as Record<string, unknown>
+            );
           case 'set_relative_property':
-            return await this.tools.setRelativeProperty(a?.paths, a?.propertyName, a?.operation, a?.value, a?.component);
-          
-          // Script Management Tools
+            return await this.tools.setRelativeProperty(
+              a?.paths as string[],
+              a?.propertyName as string,
+              a?.operation as 'add' | 'multiply' | 'divide' | 'subtract' | 'power',
+              a?.value,
+              a?.component as 'X' | 'Y' | 'Z'
+            );
+
+          // Script Management (consolidated + mass)
           case 'get_script_source':
-            return await this.tools.getScriptSource(a?.instancePath, a?.startLine, a?.endLine);
+            return await this.tools.getScriptSource(
+              a?.instancePath as string,
+              a?.startLine as number,
+              a?.endLine as number
+            );
           case 'set_script_source':
-            return await this.tools.setScriptSource(a?.instancePath, a?.source);
+            return await this.tools.setScriptSource(
+              a?.instancePath as string,
+              a?.source as string
+            );
+          case 'edit_script':
+            return await this.tools.editScript(
+              a?.instancePath as string,
+              a?.operation as 'replace' | 'insert' | 'delete',
+              a?.startLine as number,
+              a?.endLine as number,
+              a?.afterLine as number,
+              a?.content as string
+            );
+          case 'mass_get_script_source':
+            return await this.tools.massGetScriptSource(
+              a?.paths as string[],
+              a?.startLine as number,
+              a?.endLine as number
+            );
+          case 'mass_set_script_source':
+            return await this.tools.massSetScriptSource(
+              a?.scripts as Array<{instancePath: string; source: string}>
+            );
 
-          // Partial Script Editing Tools
-          case 'edit_script_lines':
-            return await this.tools.editScriptLines(a?.instancePath, a?.startLine, a?.endLine, a?.newContent);
-          case 'insert_script_lines':
-            return await this.tools.insertScriptLines(a?.instancePath, a?.afterLine || 0, a?.newContent);
-          case 'delete_script_lines':
-            return await this.tools.deleteScriptLines(a?.instancePath, a?.startLine, a?.endLine);
-
-          // Attribute Tools
-          case 'get_attribute':
-            return await this.tools.getAttribute(a?.instancePath, a?.attributeName);
-          case 'set_attribute':
-            return await this.tools.setAttribute(a?.instancePath, a?.attributeName, a?.attributeValue, a?.valueType);
+          // Attributes (consolidated + mass)
           case 'get_attributes':
-            return await this.tools.getAttributes(a?.instancePath);
+            return await this.tools.getAttributes(
+              a?.instancePath as string,
+              a?.attributeName as string
+            );
+          case 'set_attribute':
+            return await this.tools.setAttribute(
+              a?.instancePath as string,
+              a?.attributeName as string,
+              a?.attributeValue,
+              a?.valueType as string
+            );
           case 'delete_attribute':
-            return await this.tools.deleteAttribute(a?.instancePath, a?.attributeName);
+            return await this.tools.deleteAttribute(
+              a?.instancePath as string,
+              a?.attributeName as string
+            );
+          case 'mass_get_attributes':
+            return await this.tools.massGetAttributes(
+              a?.paths as string[],
+              a?.attributeName as string
+            );
+          case 'mass_set_attribute':
+            return await this.tools.massSetAttribute(
+              a?.paths as string[],
+              a?.attributeName as string,
+              a?.attributeValue,
+              a?.valueType as string
+            );
 
-          // Tag Tools (CollectionService)
+          // Tags
           case 'get_tags':
-            return await this.tools.getTags(a?.instancePath);
+            return await this.tools.getTags(a?.instancePath as string);
           case 'add_tag':
-            return await this.tools.addTag(a?.instancePath, a?.tagName);
+            return await this.tools.addTag(a?.instancePath as string, a?.tagName as string);
           case 'remove_tag':
-            return await this.tools.removeTag(a?.instancePath, a?.tagName);
+            return await this.tools.removeTag(a?.instancePath as string, a?.tagName as string);
           case 'get_tagged':
-            return await this.tools.getTagged(a?.tagName);
+            return await this.tools.getTagged(a?.tagName as string);
+          case 'mass_add_tag':
+            return await this.tools.massAddTag(a?.paths as string[], a?.tagName as string);
+          case 'mass_remove_tag':
+            return await this.tools.massRemoveTag(a?.paths as string[], a?.tagName as string);
 
-          // Selection Tools
+          // Selection
           case 'get_selection':
             return await this.tools.getSelection();
 
-          // Creator Store / Asset Tools
+          // Assets
           case 'insert_asset':
-            return await this.tools.insertAsset(a?.assetId, a?.parent, a?.position, a?.name);
+            return await this.tools.insertAsset(
+              a?.assetId as number,
+              a?.parent as string,
+              a?.position as [number, number, number],
+              a?.name as string
+            );
           case 'insert_multiple_assets':
-            return await this.tools.insertMultipleAssets(a?.assets);
+            return await this.tools.insertMultipleAssets(
+              a?.assets as Array<{assetId: number; parent: string; position?: [number, number, number]; name?: string}>
+            );
           case 'get_asset_info':
-            return await this.tools.getAssetInfo(a?.assetId);
+            return await this.tools.getAssetInfo(a?.assetId as number);
           case 'search_asset_catalog':
-            return await this.tools.searchAssetCatalog(a?.query, a?.category, a?.maxResults);
+            return await this.tools.searchAssetCatalog(
+              a?.query as string,
+              a?.category as string,
+              a?.maxResults as number
+            );
           case 'list_asset_categories':
             return await this.tools.listAssetCategories();
 
@@ -867,12 +978,14 @@ class RobloxStudioMCPServer {
       });
     });
 
+    // Mark MCP server as active BEFORE waiting for stdio connection
+    // This allows the plugin to connect and show "connected" status while waiting for MCP client
+    (httpServer as ReturnType<typeof createHttpServer> & { setMCPServerActive: (active: boolean) => void }).setMCPServerActive(true);
+    console.error('MCP server marked as active');
+
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
     console.error('Roblox Studio MCP server running on stdio');
-    
-    (httpServer as ReturnType<typeof createHttpServer> & { setMCPServerActive: (active: boolean) => void }).setMCPServerActive(true);
-    console.error('MCP server marked as active');
     
     console.error('Waiting for Studio plugin to connect...');
     
